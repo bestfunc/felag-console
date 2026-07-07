@@ -1,0 +1,13 @@
+key: actor_context
+name: 当前操作者上下文
+description: 返回当前调用者的身份与组织上下文(scope)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 操作者身份与 scope 信息
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

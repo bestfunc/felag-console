@@ -1,0 +1,13 @@
+key: plugin_source_delete
+name: 删除插件源
+description: 删除指定插件源记录
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 删除结果
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

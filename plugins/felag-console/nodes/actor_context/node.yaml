@@ -1,0 +1,13 @@
+key: actor_context
+name: 当前 Actor
+description: 返回当前用户身份 + 可管作用域子树
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: actor + manageable_scopes
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

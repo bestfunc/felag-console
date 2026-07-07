@@ -1,0 +1,13 @@
+key: skill_detail
+name: skill 详情
+description: 反查可管 skill，返回 skill + versions
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: skill + versions
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

@@ -1,0 +1,13 @@
+key: skill_list
+name: 列出 skill
+description: 按可管作用域列出 skill（根部门→子树=全树）
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: skills 列表
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

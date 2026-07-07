@@ -1,0 +1,13 @@
+key: version_delete
+name: 删除版本
+description: 反查可管 → 删除（仅 pending / rejected）→ 落审计
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: deleted
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

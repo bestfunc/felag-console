@@ -1,0 +1,13 @@
+key: plugin_discover
+name: 探测插件
+description: 拉取 git 仓 main 分支,枚举可选插件(name+version),供建源时提示;插件名仍可手填
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 可选插件列表
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

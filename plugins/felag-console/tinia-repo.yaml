@@ -1,0 +1,30 @@
+name: Skill 管理
+description: Félag 数字员工 skill 注册/审核/发布治理
+sdk:
+  python: ">=3.11"
+table_prefix: plg_felagskill_
+migrations:
+  - migrations/001_init.up.sql
+required_dbs:
+  - alias: platform_pg
+    description: 平台 PG（daily_report 库，skill 管理表所在；本期用超管 dr 凭据 id=121）
+modules:
+  nodes:
+    - actor_context
+    - skill_list
+    - skill_detail
+    - version_files
+    - skill_create
+    - skill_upload_version
+    - skill_review
+    - skill_deprecate
+    - version_delete
+    - audit_list
+  ui:
+    - name: main
+      kind: tsx
+      path: ui/SkillManager.tsx
+      title: Skill 管理
+      menu_label: Skill 管理
+      menu_icon: ListChecks
+      menu_order: 50

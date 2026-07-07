@@ -1,0 +1,27 @@
+name: 插件源管理
+description: Félag 数字员工 MCP 插件源注册/审核/分发治理
+sdk:
+  python: ">=3.11"
+table_prefix: plg_felagplugin_
+migrations:
+  - migrations/001_init.up.sql
+required_dbs:
+  - alias: platform_pg
+    description: 平台 PG（daily_report 库，插件源管理表所在；用超管 dr 凭据 id=121）
+modules:
+  nodes:
+    - actor_context
+    - plugin_source_list
+    - plugin_source_create
+    - plugin_source_review
+    - plugin_source_delete
+    - plugin_discover
+    - audit_list
+  ui:
+    - name: main
+      kind: tsx
+      path: ui/PluginSourceManager.tsx
+      title: 插件源管理
+      menu_label: 插件源管理
+      menu_icon: Boxes
+      menu_order: 51

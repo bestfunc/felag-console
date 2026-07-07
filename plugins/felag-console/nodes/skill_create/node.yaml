@@ -1,0 +1,13 @@
+key: skill_create
+name: 建 Skill
+description: 建 skill + 首版上传（pending）
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: skill_id + version_id
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

@@ -1,0 +1,13 @@
+key: skill_deprecate
+name: 弃用 skill
+description: 反查可管 → 置 deprecated → 落审计
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: status
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

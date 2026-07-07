@@ -1,0 +1,9 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object", "title": "审核版本",
+  "required": ["version_id", "action"],
+  "properties": {
+    "version_id": {"type": "integer", "title": "版本 ID"},
+    "action": {"type": "string", "title": "动作", "enum": ["approve", "reject"]}
+  }
+}

@@ -1,0 +1,13 @@
+key: plugin_source_list
+name: 插件源列表
+description: 按调用者 scope 查询可见的插件源列表(可选按状态过滤)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 插件源列表
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

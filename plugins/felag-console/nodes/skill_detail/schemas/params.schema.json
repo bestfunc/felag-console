@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object", "title": "按 skill",
+  "required": ["skill_id"],
+  "properties": {
+    "skill_id": {"type": "integer", "title": "Skill ID"}
+  }
+}

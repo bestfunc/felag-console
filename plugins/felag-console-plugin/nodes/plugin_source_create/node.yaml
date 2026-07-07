@@ -1,0 +1,13 @@
+key: plugin_source_create
+name: 新增插件源
+description: 注册新的插件源(初始状态 draft)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 新建的插件源记录
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

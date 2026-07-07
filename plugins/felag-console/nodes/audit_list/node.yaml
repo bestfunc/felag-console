@@ -1,0 +1,13 @@
+key: audit_list
+name: 审计日志
+description: 按可管作用域子树列出审计（根部门→全见）
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: audit 列表
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

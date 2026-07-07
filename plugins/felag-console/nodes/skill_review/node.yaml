@@ -1,0 +1,13 @@
+key: skill_review
+name: 审核版本
+description: approve（即发布）/ reject；条件 UPDATE 防并发双发
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: review_status + self_review
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

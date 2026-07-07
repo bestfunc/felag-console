@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "properties": {
+    "git_url": {"type": "string"}
+  },
+  "required": ["git_url"]
+}

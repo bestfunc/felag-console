@@ -1,0 +1,13 @@
+key: skill_upload_version
+name: 传新版本
+description: 给已有 skill 传新版本（pending）
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: version_id
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt
