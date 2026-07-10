@@ -8,6 +8,7 @@ migrations:
   - migrations/002_add_branch.up.sql
   - migrations/003_config.up.sql
   - migrations/004_sync_flag.up.sql
+  - migrations/005_git_version.up.sql
 required_dbs:
   - alias: platform_pg
     description: 平台 PG（daily_report 库，插件源管理表所在；用超管 dr 凭据 id=121）

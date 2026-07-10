@@ -52,6 +52,18 @@ def test_list_only_manageable(conn):
     assert {r["plugin"] for r in out["sources"]} == {"p1"}
     json.dumps(out)   # created_at/reviewed_at datetime 不转 isoformat 会抛 → fail
 
+def test_list_reads_git_version_column(conn):
+    # B 方案:list handler 直接读 git_version 列(felag-server 摄取回写),不再逐行探 GitHub。
+    p = StubProvider(["dept:1"]); a = Actor("u1")
+    sid = store.create_source(conn, "https://github.com/o/r", "p1", "dept:1", "u1")
+    with conn.cursor() as cur:
+        cur.execute(f"UPDATE {store.P}sources SET git_version='2.3.4' WHERE id=%s", (sid,))
+    conn.commit()
+    out = N.handle_plugin_source_list({}, conn, p, a)
+    row = next(r for r in out["sources"] if r["plugin"] == "p1")
+    assert row["git_version"] == "2.3.4"
+    json.dumps(out)
+
 def test_audit_list_json_serializable(conn):
     p = StubProvider(["dept:1"]); a = Actor("u1")
     store.add_audit(conn, "u1", "dept:1", "source.create", "source:1", {"k": "v"}); conn.commit()

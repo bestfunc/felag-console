@@ -4,7 +4,7 @@ import json
 P = "plg_felagplugin_"
 
 def _cols():
-    return "id, git_url, plugin, scope_ref, branch, status, created_by, reviewed_by, created_at, reviewed_at, sync_requested_at"
+    return "id, git_url, plugin, scope_ref, branch, status, created_by, reviewed_by, created_at, reviewed_at, sync_requested_at, git_version"
 
 def _jsonify(d):
     """把行里的 datetime/date(created_at/reviewed_at 等 TIMESTAMPTZ)转 isoformat 字符串,
@@ -14,7 +14,7 @@ def _jsonify(d):
 def _row(r):
     if r is None:
         return None
-    k = ["id", "git_url", "plugin", "scope_ref", "branch", "status", "created_by", "reviewed_by", "created_at", "reviewed_at", "sync_requested_at"]
+    k = ["id", "git_url", "plugin", "scope_ref", "branch", "status", "created_by", "reviewed_by", "created_at", "reviewed_at", "sync_requested_at", "git_version"]
     return _jsonify(dict(zip(k, r)))
 
 def create_source(conn, git_url, plugin, scope_ref, created_by, branch="main") -> int:

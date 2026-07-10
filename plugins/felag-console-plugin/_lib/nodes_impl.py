@@ -127,15 +127,9 @@ def handle_plugin_source_sync(params, conn, provider, actor) -> dict:
 def handle_plugin_source_list(params, conn, provider, actor) -> dict:
     status = params.get("status")
     rows = store.list_sources_by_scopes(conn, provider.manageable_scope_refs(actor), status=status)
-    # 每行补 git_version:探该源 branch HEAD 的插件版本(软失败→None,列表展示 '—')。
-    # 同 (git,branch,plugin) 去重,只探一次,避免同源多 scope 重复打 github。
-    token = _github_token()
-    cache: dict = {}
-    for r in rows:
-        key = (r["git_url"], r.get("branch") or "main", r["plugin"])
-        if key not in cache:
-            cache[key] = discover.probe_version(key[0], key[1], key[2], token=token)
-        r["git_version"] = cache[key]
+    # git_version 直接读列(由 felag-server 摄取 approved 源时写回,见 felag pluginsrc.Syncer)。
+    # 不再在列表加载时逐行同步探 GitHub —— 那会让列表随源数线性变慢、且受 121→github 抖动/限流拖垮
+    # (原实现单源最坏 12s、串行叠加顶穿节点 30s)。draft/未摄取源 git_version 为 NULL,前端展示 '—/待审核'。
     return {"sources": rows}
 
 def handle_audit_list(params, conn, provider, actor) -> dict:
