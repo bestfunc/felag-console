@@ -4,7 +4,7 @@ import json
 P = "plg_felagplugin_"
 
 def _cols():
-    return "id, git_url, plugin, scope_ref, status, created_by, reviewed_by, created_at, reviewed_at"
+    return "id, git_url, plugin, scope_ref, branch, status, created_by, reviewed_by, created_at, reviewed_at"
 
 def _jsonify(d):
     """把行里的 datetime/date(created_at/reviewed_at 等 TIMESTAMPTZ)转 isoformat 字符串,
@@ -14,14 +14,14 @@ def _jsonify(d):
 def _row(r):
     if r is None:
         return None
-    k = ["id", "git_url", "plugin", "scope_ref", "status", "created_by", "reviewed_by", "created_at", "reviewed_at"]
+    k = ["id", "git_url", "plugin", "scope_ref", "branch", "status", "created_by", "reviewed_by", "created_at", "reviewed_at"]
     return _jsonify(dict(zip(k, r)))
 
-def create_source(conn, git_url, plugin, scope_ref, created_by) -> int:
+def create_source(conn, git_url, plugin, scope_ref, created_by, branch="main") -> int:
     with conn.cursor() as cur:
         cur.execute(
-            f"INSERT INTO {P}sources (git_url, plugin, scope_ref, created_by) VALUES (%s,%s,%s,%s) RETURNING id",
-            (git_url, plugin, scope_ref, created_by))
+            f"INSERT INTO {P}sources (git_url, plugin, scope_ref, branch, created_by) VALUES (%s,%s,%s,%s,%s) RETURNING id",
+            (git_url, plugin, scope_ref, branch or "main", created_by))
         sid = cur.fetchone()[0]
     return sid
 

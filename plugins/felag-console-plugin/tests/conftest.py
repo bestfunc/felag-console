@@ -1,14 +1,14 @@
 import os, pathlib, psycopg2, pytest
 
 TABLE_PREFIX = "plg_felagplugin_"
-_MIG = pathlib.Path(__file__).resolve().parents[1] / "migrations" / "001_init.up.sql"
+_MIG_DIR = pathlib.Path(__file__).resolve().parents[1] / "migrations"
 
 
 def _apply_migration(c):
-    sql = _MIG.read_text(encoding="utf-8").replace("${table_prefix}", TABLE_PREFIX)
     with c.cursor() as cur:
         cur.execute(f"DROP TABLE IF EXISTS {TABLE_PREFIX}audit, {TABLE_PREFIX}sources CASCADE")
-        cur.execute(sql)
+        for f in sorted(_MIG_DIR.glob("*.up.sql")):   # 001 建表 → 002 加 branch,按序应用
+            cur.execute(f.read_text(encoding="utf-8").replace("${table_prefix}", TABLE_PREFIX))
     c.commit()
 
 

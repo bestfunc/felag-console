@@ -54,7 +54,7 @@ const thStyle: React.CSSProperties = {
 const inputStyle: React.CSSProperties = { border: `1px solid ${C.line}`, borderRadius: 14, color: C.ink };
 const dialogStyle: React.CSSProperties = {
   background: C.surface, border: `1px solid ${C.line}`, borderRadius: 24, boxShadow: SHADOW_FEATURED,
-  fontFamily: FZH,
+  fontFamily: FZH, width: "94vw", maxWidth: 640, maxHeight: "88vh", overflowY: "auto",
 };
 
 async function callNode<T>(node: string, params: object): Promise<T> {
@@ -71,9 +71,9 @@ async function callNode<T>(node: string, params: object): Promise<T> {
   return first?.output?.result as T;
 }
 
-type Scope = { scope_ref: string; label: string };
+type Scope = { scope_ref: string; label: string; parent_ref?: string | null };
 type Source = {
-  id: number; git_url: string; plugin: string; scope_ref: string; status: string;
+  id: number; git_url: string; plugin: string; scope_ref: string; branch: string; status: string;
   created_by: string; reviewed_by: string | null; created_at?: string; reviewed_at?: string | null;
 };
 
@@ -83,13 +83,92 @@ function StatusBadge({ status }: { status: string }) {
   return <Badge style={{ color: C.warnText, background: C.warnBg, border: `1px solid ${C.warnBorder}66`, fontFamily: FMONO, fontSize: 12, borderRadius: 999 }}>待审核</Badge>;
 }
 
+// 作用域列式级联(changeOnSelect):点任一节点=直接选中它(总部=全部部门 / 部门=该部门全部岗位 / 岗位=该岗位),
+// 含子级的节点点选后右侧自动展开供细选,无需再点三角。右侧件数徽章提示"还能往下选"(用 mono 文本非符号图标,合白名单)。
+function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: string; onChange: (ref: string) => void }) {
+  const [path, setPath] = useState<string[]>([]);
+  const refset = new Set(scopes.map((s) => s.scope_ref));
+  const byRef: Record<string, Scope> = {};
+  scopes.forEach((s) => { byRef[s.scope_ref] = s; });
+  const isRoot = (s: Scope) => !s.parent_ref || !refset.has(s.parent_ref);
+  const isDept = (ref: string) => ref.startsWith("dept:") || ref.startsWith("branch:");
+  const childrenOf = (ref: string) => scopes.filter((s) => s.parent_ref === ref).sort((a, b) => a.label.localeCompare(b.label));
+  const roots = scopes.filter(isRoot).sort((a, b) => a.label.localeCompare(b.label));
+
+  const columns: Scope[][] = [roots];
+  for (const p of path) { const kids = childrenOf(p); if (kids.length) columns.push(kids); }
+
+  const selLabel = (ref: string): string => {
+    const n = byRef[ref]; if (!n) return ref;
+    if (isDept(ref)) return n.label + (isRoot(n) ? " · 全部部门" : " · 全部岗位");
+    const par = n.parent_ref ? byRef[n.parent_ref] : undefined;
+    return (par ? par.label + " / " : "") + n.label;
+  };
+  // 选中即下钻:选它 + 有子级则展开右侧列(截掉更深旧路径),无子级则收拢到本层
+  const pick = (ci: number, n: Scope) => {
+    onChange(n.scope_ref);
+    const kids = childrenOf(n.scope_ref);
+    setPath((prev) => (kids.length ? [...prev.slice(0, ci), n.scope_ref] : prev.slice(0, ci)));
+  };
+
+  return (
+    <div>
+      {/* 列区自身横向内滚,绝不把弹窗撑出横条(层数多时在此滚动) */}
+      <div style={{ overflowX: "auto", border: `1px solid ${C.line}`, borderRadius: 14, background: C.surface }}>
+        <div style={{ display: "flex", minWidth: "min-content" }}>
+          {columns.map((col, ci) => (
+            <div key={ci} style={{ flex: "0 0 162px", width: 162, maxHeight: 248, overflowY: "auto",
+              borderRight: ci < columns.length - 1 ? `1px solid ${C.surface2}` : "none" }}>
+              {col.length === 0 && <div style={{ padding: 10, fontFamily: FMONO, fontSize: 12, color: C.muted }}>（空）</div>}
+              {col.map((n) => {
+                const kids = childrenOf(n.scope_ref);
+                const dept = isDept(n.scope_ref);
+                const selected = value === n.scope_ref;
+                const opened = path[ci] === n.scope_ref;
+                return (
+                  <div key={n.scope_ref} onClick={() => pick(ci, n)}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6,
+                      padding: "8px 10px", cursor: "pointer", fontFamily: FZH, fontSize: 13,
+                      color: selected ? C.signal : C.ink,
+                      background: selected ? C.blueTint : opened ? C.surface2 : C.surface,
+                      borderBottom: `1px solid ${C.surface2}` }}>
+                    <span style={{ display: "flex", flexDirection: "column", lineHeight: 1.3, minWidth: 0 }}>
+                      <span style={{ fontWeight: selected ? 700 : 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
+                      {dept && (
+                        <span style={{ fontFamily: FMONO, fontSize: 12, color: C.muted, letterSpacing: ".02em" }}>
+                          {isRoot(n) ? "选中=全部部门" : "选中=全部岗位"}
+                        </span>
+                      )}
+                    </span>
+                    {kids.length > 0 && (
+                      <span style={{ flexShrink: 0, fontFamily: FMONO, fontSize: 12, letterSpacing: ".02em",
+                        color: opened ? C.signal : C.muted, background: opened ? C.blueTint : C.surface2,
+                        border: `1px solid ${opened ? C.signal + "55" : C.line}`, borderRadius: 999, padding: "1px 7px" }}>
+                        {kids.length} {isRoot(n) ? "部门" : "岗位"}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginTop: 6, fontFamily: FMONO, fontSize: 12, color: value ? C.signal : C.muted }}>
+        {value ? `已选：${selLabel(value)}` : "点部门=选其“全部岗位”，含下级会自动展开右侧供细选"}
+      </div>
+    </div>
+  );
+}
+
 export default function PluginSourceManager() {
   const [sources, setSources] = useState<Source[]>([]);
   const [scopes, setScopes] = useState<Scope[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState({ git_url: "", plugin: "", scope_ref: "" });
+  const [form, setForm] = useState({ git_url: "", plugin: "", scope_ref: "", branch: "" });
   const [busy, setBusy] = useState(false);
   const [discovered, setDiscovered] = useState<{ name: string; version: string }[]>([]);
+  const [branches, setBranches] = useState<string[]>([]);
   const [discovering, setDiscovering] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -107,31 +186,51 @@ export default function PluginSourceManager() {
   const scopeName = (ref: string) => scopes.find((s) => s.scope_ref === ref)?.label || ref;
 
   function openCreate() {
-    setForm({ git_url: "", plugin: "", scope_ref: "" }); setDiscovered([]); setCreateOpen(true);
+    setForm({ git_url: "", plugin: "", scope_ref: "", branch: "" });
+    setDiscovered([]); setBranches([]); setCreateOpen(true);
   }
 
-  // 探测:拉 git 仓枚举可选插件作提示;插件名仍可手填,点列表项即填入
+  // 枚举某分支下的插件(填探测结果提示;枚举=下载整包,大仓/慢网可能软失败,此时插件名手填即可)
+  async function enumerate(git_url: string, branch: string) {
+    const r = await callNode<{ plugins?: { name: string; version: string }[]; plugins_error?: string }>("plugin_discover", { git_url, branch });
+    const plugins = r.plugins ?? [];
+    setDiscovered(plugins);
+    if (r.plugins_error) toast.error(r.plugins_error);
+    else if (plugins.length === 0) toast.error(`分支 ${branch} 下未发现可用插件`);
+  }
+
+  // 探测:先列所有分支(git smart-HTTP,不吃 REST 限流)→ 选默认分支 → 枚举该分支插件;分支/插件名仍可手填
   async function doDiscover() {
     const git_url = form.git_url.trim();
     if (!git_url) { toast.error("请先填 Git 地址"); return; }
     setDiscovering(true);
     try {
-      const r = await callNode<{ plugins: { name: string; version: string }[] }>("plugin_discover", { git_url });
-      setDiscovered(r.plugins);
-      if (r.plugins.length === 0) toast.error("该仓下未发现可用插件");
+      const r = await callNode<{ branches: string[]; default_branch: string }>("plugin_discover", { git_url });
+      setBranches(r.branches);
+      const br = r.default_branch || "main";
+      setForm((f) => ({ ...f, branch: br }));
+      await enumerate(git_url, br);
     } catch (e: any) { toast.error(e.message); }
     finally { setDiscovering(false); }
+  }
+
+  // 切分支:重新枚举该分支下插件(清空已选插件避免跨分支串味)
+  async function onBranchChange(br: string) {
+    setForm((f) => ({ ...f, branch: br, plugin: "" }));
+    const git_url = form.git_url.trim();
+    if (git_url) { try { await enumerate(git_url, br); } catch (e: any) { toast.error(e.message); } }
   }
 
   async function doCreate() {
     const git_url = form.git_url.trim();
     const plugin = form.plugin.trim();
+    const branch = form.branch.trim() || "main";
     if (!git_url) { toast.error("请填 git_url"); return; }
     if (!plugin) { toast.error("请填 plugin"); return; }
     if (!form.scope_ref) { toast.error("请选择作用域"); return; }
     setBusy(true);
     try {
-      await callNode("plugin_source_create", { git_url, plugin, scope_ref: form.scope_ref });
+      await callNode("plugin_source_create", { git_url, plugin, scope_ref: form.scope_ref, branch });
       toast.success("已提交待审核"); setCreateOpen(false); refresh();
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
@@ -171,6 +270,7 @@ export default function PluginSourceManager() {
           <TableHeader>
             <TableRow style={{ background: C.surface2 }}>
               <TableHead style={thStyle}>Git 地址</TableHead><TableHead style={thStyle}>插件</TableHead>
+              <TableHead style={thStyle}>分支</TableHead>
               <TableHead style={thStyle}>作用域</TableHead><TableHead style={thStyle}>状态</TableHead>
               <TableHead style={thStyle}></TableHead>
             </TableRow>
@@ -180,6 +280,7 @@ export default function PluginSourceManager() {
               <TableRow key={s.id}>
                 <TableCell style={{ fontFamily: FMONO, fontSize: 13, color: C.ink }}>{s.git_url}</TableCell>
                 <TableCell style={{ fontWeight: 500, color: C.ink }}>{s.plugin}</TableCell>
+                <TableCell><Badge style={pill(C.body, C.surface2)}>{s.branch || "main"}</Badge></TableCell>
                 <TableCell><Badge style={pill(C.signal, C.signalTint)}>{scopeName(s.scope_ref)}</Badge></TableCell>
                 <TableCell><StatusBadge status={s.status} /></TableCell>
                 <TableCell>
@@ -210,7 +311,7 @@ export default function PluginSourceManager() {
             ))}
             {sources.length === 0 && (
               <TableRow>
-                <TableCell colSpan={5}>
+                <TableCell colSpan={6}>
                   <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "32px 0", textAlign: "center" }}>暂无插件源</div>
                 </TableCell>
               </TableRow>
@@ -249,12 +350,17 @@ export default function PluginSourceManager() {
                 </div>
               )}
             </div>
+            {branches.length > 0 && (
+              <div><Label style={labelStyle}>分支</Label>
+                <Select value={form.branch} onValueChange={onBranchChange}>
+                  <SelectTrigger style={inputStyle}><SelectValue placeholder="选择分支" /></SelectTrigger>
+                  <SelectContent>{branches.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            )}
             <div><Label style={labelStyle}>插件名</Label><Input style={inputStyle} value={form.plugin} onChange={(e) => setForm({ ...form, plugin: e.target.value })} placeholder="mcp 插件名（可手填，或点上方探测结果）" /></div>
             <div><Label style={labelStyle}>作用域</Label>
-              <Select value={form.scope_ref} onValueChange={(v) => setForm({ ...form, scope_ref: v })}>
-                <SelectTrigger style={inputStyle}><SelectValue placeholder="选择作用域" /></SelectTrigger>
-                <SelectContent>{scopes.map((s) => <SelectItem key={s.scope_ref} value={s.scope_ref}>{s.label}</SelectItem>)}</SelectContent>
-              </Select>
+              <ScopeCascader scopes={scopes} value={form.scope_ref} onChange={(v) => setForm({ ...form, scope_ref: v })} />
             </div>
           </div>
           <DialogFooter>
