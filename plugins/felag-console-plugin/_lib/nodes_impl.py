@@ -110,9 +110,32 @@ def handle_plugin_source_delete(params, conn, provider, actor) -> dict:
     conn.commit()
     return {"deleted": True}
 
+def handle_plugin_source_sync(params, conn, provider, actor) -> dict:
+    """请求立即同步:置该源 sync_requested_at=now(),felag-server 快轮询拾取后立即重摄。
+    仅 approved 源;越权/非 approved → 拒。写审计。"""
+    source_id = params.get("source_id")
+    row = _load_owned(conn, provider, actor, source_id)
+    if row["status"] != "approved":
+        raise NodeError("仅 approved 插件源可请求同步")
+    if not store.request_sync(conn, source_id):
+        conn.rollback()
+        raise NodeError("插件源状态已变(非 approved),请刷新")
+    store.add_audit(conn, actor.user_id, row["scope_ref"], "source.sync_request", f"source:{source_id}", {})
+    conn.commit()
+    return {"sync_requested": True}
+
 def handle_plugin_source_list(params, conn, provider, actor) -> dict:
     status = params.get("status")
     rows = store.list_sources_by_scopes(conn, provider.manageable_scope_refs(actor), status=status)
+    # 每行补 git_version:探该源 branch HEAD 的插件版本(软失败→None,列表展示 '—')。
+    # 同 (git,branch,plugin) 去重,只探一次,避免同源多 scope 重复打 github。
+    token = _github_token()
+    cache: dict = {}
+    for r in rows:
+        key = (r["git_url"], r.get("branch") or "main", r["plugin"])
+        if key not in cache:
+            cache[key] = discover.probe_version(key[0], key[1], key[2], token=token)
+        r["git_version"] = cache[key]
     return {"sources": rows}
 
 def handle_audit_list(params, conn, provider, actor) -> dict:

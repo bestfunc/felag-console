@@ -4,7 +4,7 @@ import json
 P = "plg_felagplugin_"
 
 def _cols():
-    return "id, git_url, plugin, scope_ref, branch, status, created_by, reviewed_by, created_at, reviewed_at"
+    return "id, git_url, plugin, scope_ref, branch, status, created_by, reviewed_by, created_at, reviewed_at, sync_requested_at"
 
 def _jsonify(d):
     """把行里的 datetime/date(created_at/reviewed_at 等 TIMESTAMPTZ)转 isoformat 字符串,
@@ -14,7 +14,7 @@ def _jsonify(d):
 def _row(r):
     if r is None:
         return None
-    k = ["id", "git_url", "plugin", "scope_ref", "branch", "status", "created_by", "reviewed_by", "created_at", "reviewed_at"]
+    k = ["id", "git_url", "plugin", "scope_ref", "branch", "status", "created_by", "reviewed_by", "created_at", "reviewed_at", "sync_requested_at"]
     return _jsonify(dict(zip(k, r)))
 
 def create_source(conn, git_url, plugin, scope_ref, created_by, branch="main") -> int:
@@ -67,6 +67,15 @@ def delete_source(conn, source_id) -> bool:
             f"DELETE FROM {P}sources WHERE id=%s AND status IN ('draft','deprecated') RETURNING id", (source_id,))
         ok = cur.fetchone() is not None
     return ok
+
+def request_sync(conn, source_id) -> bool:
+    """置 sync_requested_at=now(),仅对 approved 源生效(felag-server 只摄 approved)。
+    返回是否命中(非 approved / 不存在 → False)。不 commit(节点层收口)。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE {P}sources SET sync_requested_at=now() WHERE id=%s AND status='approved' RETURNING id",
+            (source_id,))
+        return cur.fetchone() is not None
 
 def add_audit(conn, actor, scope_ref, action, target, detail):
     with conn.cursor() as cur:

@@ -1,0 +1,13 @@
+key: plugin_source_sync
+name: 请求同步插件源
+description: 置 approved 源 sync_requested_at=now(),felag-server 快轮询拾取后立即重摄(scope 反查鉴权)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 是否已请求同步
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

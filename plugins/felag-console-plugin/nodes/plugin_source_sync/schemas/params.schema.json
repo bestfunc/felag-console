@@ -1,0 +1,7 @@
+{
+  "type": "object",
+  "properties": {
+    "source_id": {"type": "integer"}
+  },
+  "required": ["source_id"]
+}

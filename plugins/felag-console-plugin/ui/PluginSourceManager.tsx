@@ -75,6 +75,7 @@ type Scope = { scope_ref: string; label: string; parent_ref?: string | null };
 type Source = {
   id: number; git_url: string; plugin: string; scope_ref: string; branch: string; status: string;
   created_by: string; reviewed_by: string | null; created_at?: string; reviewed_at?: string | null;
+  git_version?: string | null; sync_requested_at?: string | null;
 };
 
 function StatusBadge({ status }: { status: string }) {
@@ -252,6 +253,15 @@ export default function PluginSourceManager() {
     } catch (e: any) { toast.error(e.message); }
   }
 
+  // 请求立即同步:置 sync_requested_at,felag-server 快轮询(约 30s)拾取后重摄该源
+  async function sync(source_id: number) {
+    try {
+      await callNode("plugin_source_sync", { source_id });
+      toast.success("已请求同步，约 30 秒内 felag-server 会重新摄取该源");
+      refresh();
+    } catch (e: any) { toast.error(e.message); }
+  }
+
   return (
     <div className="px-8 py-6 space-y-5" style={{ background: AURORA, minHeight: "100%", fontFamily: FZH }}>
       <div className="flex items-end justify-between">
@@ -270,6 +280,7 @@ export default function PluginSourceManager() {
           <TableHeader>
             <TableRow style={{ background: C.surface2 }}>
               <TableHead style={thStyle}>Git 地址</TableHead><TableHead style={thStyle}>插件</TableHead>
+              <TableHead style={thStyle}>版本</TableHead>
               <TableHead style={thStyle}>分支</TableHead>
               <TableHead style={thStyle}>作用域</TableHead><TableHead style={thStyle}>状态</TableHead>
               <TableHead style={thStyle}></TableHead>
@@ -280,6 +291,11 @@ export default function PluginSourceManager() {
               <TableRow key={s.id}>
                 <TableCell style={{ fontFamily: FMONO, fontSize: 13, color: C.ink }}>{s.git_url}</TableCell>
                 <TableCell style={{ fontWeight: 500, color: C.ink }}>{s.plugin}</TableCell>
+                <TableCell>
+                  {s.git_version
+                    ? <Badge style={pill(C.signal, C.signalTint)}>{"v" + s.git_version}</Badge>
+                    : <span style={{ fontFamily: FMONO, fontSize: 13, color: C.muted }}>—</span>}
+                </TableCell>
                 <TableCell><Badge style={pill(C.body, C.surface2)}>{s.branch || "main"}</Badge></TableCell>
                 <TableCell><Badge style={pill(C.signal, C.signalTint)}>{scopeName(s.scope_ref)}</Badge></TableCell>
                 <TableCell><StatusBadge status={s.status} /></TableCell>
@@ -296,9 +312,14 @@ export default function PluginSourceManager() {
                       </>
                     )}
                     {s.status === "approved" && (
-                      <Button variant="outline" size="sm" style={btnGhost} onClick={() => review(s.id, "deprecate")}>
-                        <X className="size-4 mr-1" />停用
-                      </Button>
+                      <>
+                        <Button size="sm" style={{ ...btnPrimary, boxShadow: "none" }} onClick={() => sync(s.id)}>
+                          <RefreshCw className="size-4 mr-1" />更新
+                        </Button>
+                        <Button variant="outline" size="sm" style={btnGhost} onClick={() => review(s.id, "deprecate")}>
+                          <X className="size-4 mr-1" />停用
+                        </Button>
+                      </>
                     )}
                     {s.status === "deprecated" && (
                       <Button variant="outline" size="sm" style={btnDanger} onClick={() => remove(s.id)}>
@@ -311,7 +332,7 @@ export default function PluginSourceManager() {
             ))}
             {sources.length === 0 && (
               <TableRow>
-                <TableCell colSpan={6}>
+                <TableCell colSpan={7}>
                   <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "32px 0", textAlign: "center" }}>暂无插件源</div>
                 </TableCell>
               </TableRow>

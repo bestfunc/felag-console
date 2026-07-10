@@ -151,6 +151,31 @@ def list_branches(git_url: str, timeout: int = 6, token: str | None = None) -> d
     return result
 
 
+def probe_version(git_url: str, branch: str, plugin: str, timeout: int = 6, token: str | None = None) -> "str | None":
+    """轻量取单个插件在 branch HEAD 的版本:GitHub Contents API 只拉
+    plugins/<plugin>/.claude-plugin/plugin.json(小 JSON,远比整包 tarball 便宜),读 version。
+    任何失败(非 github / 网络 / 404 / base64 / 解析)→ None(软失败,列表展示 '—')。REST 认 Bearer。"""
+    try:
+        owner, repo = _owner_repo(git_url)
+    except ValueError:
+        return None
+    path = f"plugins/{plugin}/.claude-plugin/plugin.json"
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}?ref={branch or 'main'}"
+    req = urllib.request.Request(url, headers=_with_auth({
+        "User-Agent": "felag-console-plugin",
+        "Accept": "application/vnd.github+json",
+    }, token))
+    try:
+        obj = json.loads(_read_retry(req, timeout=timeout, cap=1 << 20, attempts=2))
+        content = obj.get("content", "")
+        if obj.get("encoding") == "base64":
+            content = base64.b64decode(content).decode("utf-8")
+        v = json.loads(content).get("version")
+        return v or None
+    except Exception:
+        return None
+
+
 def enumerate_plugins(archive_gz: bytes) -> list:
     """从 repo tarball 枚举所有 */plugins/<name>/.claude-plugin/plugin.json,
     校验 name==目录名 且 version 非空,返回 [{name, version}](按 name 升序)。"""
