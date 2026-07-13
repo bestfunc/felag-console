@@ -1,0 +1,24 @@
+name: 客户端版本管理
+description: Félag 数字员工客户端(felag-client)安装包发布/回滚/删除治理，双平台(Windows/macOS)独立当前版
+sdk:
+  python: ">=3.11"
+table_prefix: plg_felagapp_
+migrations:
+  - migrations/001_init.up.sql
+required_dbs:
+  - alias: platform_pg
+    description: 平台 PG（daily_report 库，客户端发布表所在；用超管 dr 凭据 id=121）
+modules:
+  nodes:
+    - release_list
+    - release_upload
+    - release_publish
+    - release_delete
+  ui:
+    - name: main
+      kind: tsx
+      path: ui/AppReleaseManager.tsx
+      title: 客户端版本管理
+      menu_label: 客户端版本
+      menu_icon: Rocket
+      menu_order: 52

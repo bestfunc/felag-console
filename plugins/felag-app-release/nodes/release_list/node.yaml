@@ -1,0 +1,13 @@
+key: release_list
+name: 客户端版本列表
+description: 列出全部客户端安装包发布记录(双平台,标当前在线版);仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 发布记录列表
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

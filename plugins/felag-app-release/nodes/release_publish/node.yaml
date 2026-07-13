@@ -1,0 +1,13 @@
+key: release_publish
+name: 发布/回滚
+description: 把某发布记录设为该平台当前在线版(发布旧版=回滚,只切同平台);仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 发布结果
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

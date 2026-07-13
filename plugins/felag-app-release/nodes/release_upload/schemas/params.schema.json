@@ -1,0 +1,12 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "上传安装包",
+  "required": ["version", "platform", "content_b64"],
+  "properties": {
+    "version": {"type": "string", "title": "版本号", "minLength": 1, "maxLength": 32},
+    "platform": {"type": "string", "title": "平台", "enum": ["windows", "darwin"]},
+    "notes": {"type": "string", "title": "更新说明"},
+    "content_b64": {"type": "string", "title": "安装包(base64)"}
+  }
+}
