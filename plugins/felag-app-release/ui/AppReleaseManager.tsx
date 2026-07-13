@@ -85,6 +85,13 @@ function fmtSize(n: number): string {
   return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(n / 1024).toFixed(0)} KB`;
 }
 
+// 从安装包文件名提取版本号（构建命名约定 felag-client-setup-v0.0.27.exe / felag-client-v0.0.27.dmg）。
+// 优先取 v 前缀后的点分数字；退而取任意 x.y.z。识别不到返回 ""（回落手填）。
+function extractVersion(name: string): string {
+  const m = name.match(/[-_]v(\d+(?:\.\d+){1,3})/i) || name.match(/(\d+\.\d+\.\d+(?:\.\d+)?)/);
+  return m ? m[1] : "";
+}
+
 export default function AppReleaseManager() {
   const [releases, setReleases] = useState<Release[]>([]);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -103,16 +110,20 @@ export default function AppReleaseManager() {
 
   function openUpload() {
     setForm({ version: "", platform: "windows", notes: "" });
-    setFile(null); setUploadOpen(true);
+    setFile(null); setVerAuto(false); setUploadOpen(true);
   }
 
-  // 选文件时按扩展名自动判平台（.exe→windows / .dmg→darwin），仍可手动改
+  const [verAuto, setVerAuto] = useState(false);
+
+  // 选文件时按扩展名自动判平台（.exe→windows / .dmg→darwin）+ 从文件名探测版本号，均仍可手动改
   function onPickFile(f: File | null) {
     setFile(f);
-    if (!f) return;
+    if (!f) { setVerAuto(false); return; }
     const low = f.name.toLowerCase();
-    if (low.endsWith(".dmg")) setForm((s) => ({ ...s, platform: "darwin" }));
-    else if (low.endsWith(".exe")) setForm((s) => ({ ...s, platform: "windows" }));
+    const platform = low.endsWith(".dmg") ? "darwin" : low.endsWith(".exe") ? "windows" : undefined;
+    const ver = extractVersion(f.name);
+    setVerAuto(!!ver);
+    setForm((s) => ({ ...s, platform: platform ?? s.platform, version: ver || s.version }));
   }
 
   async function doUpload() {
@@ -249,7 +260,12 @@ export default function AppReleaseManager() {
             </div>
             <div>
               <Label style={labelStyle}>版本号</Label>
-              <Input style={inputStyle} value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} placeholder="如 0.0.27" />
+              <Input style={inputStyle} value={form.version}
+                onChange={(e) => { setVerAuto(false); setForm({ ...form, version: e.target.value }); }}
+                placeholder="选择文件后自动识别，如 0.0.27" />
+              <div style={{ marginTop: 6, fontFamily: FMONO, fontSize: 12, color: verAuto ? C.ok : C.muted }}>
+                {verAuto ? "已从文件名识别，可修改" : "从文件名自动识别（如未识别请手填）"}
+              </div>
             </div>
             <div>
               <Label style={labelStyle}>更新说明</Label>
