@@ -51,6 +51,33 @@ async function callNode<T>(node: string, params: object): Promise<T> {
   return first?.output?.result as T;
 }
 
+// uploadNode 走 XHR 上传节点,带上传进度回调(fetch 不支持 upload progress)。
+// 大包(~90MB base64 后 ~120MB)需要真实进度条,故上传路径单走 XHR。env 解析与 callNode 对齐。
+function uploadNode<T>(node: string, params: object, onProgress: (pct: number) => void): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/dag/${SLUG}/${node}`);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () => {
+      let env: any;
+      try { env = JSON.parse(xhr.responseText); } catch { reject(new Error("响应解析失败")); return; }
+      const first = env?.data?.results?.[0];
+      if (env?.code !== 0 || first?.error) {
+        const raw = first?.error || env?.message || `请求失败(HTTP ${xhr.status})`;
+        const m = String(raw).match(/(?:ValueError|RuntimeError|NodeError|TypeError):\s*([^\n]+)/);
+        reject(new Error(m ? m[1].trim() : String(raw)));
+      } else {
+        resolve(first?.output?.result as T);
+      }
+    };
+    xhr.onerror = () => reject(new Error("网络错误,上传失败"));
+    xhr.send(JSON.stringify(params));
+  });
+}
+
 // 读文件为 base64（分块 btoa,避免大文件撑爆调用栈）。
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -98,6 +125,8 @@ export default function AppReleaseManager() {
   const [form, setForm] = useState({ version: "", platform: "windows", notes: "" });
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
+  // upload 进度:"reading"=读盘/base64 阶段(不确定进度) | 0-100=上传百分比 | null=空闲
+  const [progress, setProgress] = useState<"reading" | number | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -110,7 +139,7 @@ export default function AppReleaseManager() {
 
   function openUpload() {
     setForm({ version: "", platform: "windows", notes: "" });
-    setFile(null); setVerAuto(false); setUploadOpen(true);
+    setFile(null); setVerAuto(false); setProgress(null); setUploadOpen(true);
   }
 
   const [verAuto, setVerAuto] = useState(false);
@@ -131,12 +160,14 @@ export default function AppReleaseManager() {
     if (!version) { toast.error("请填版本号"); return; }
     if (!file) { toast.error("请选择安装包文件"); return; }
     setBusy(true);
+    setProgress("reading");
     try {
       const content_b64 = await fileToBase64(file);
-      await callNode("release_upload", { version, platform: form.platform, notes: form.notes.trim(), content_b64 });
+      setProgress(0);
+      await uploadNode("release_upload", { version, platform: form.platform, notes: form.notes.trim(), content_b64 }, setProgress);
       toast.success("已上传（未发布）"); setUploadOpen(false); refresh();
     } catch (e: any) { toast.error(e.message); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setProgress(null); }
   }
 
   async function publish(r: Release) {
@@ -273,9 +304,26 @@ export default function AppReleaseManager() {
                 style={{ ...inputStyle, width: "100%", padding: "8px 12px", fontFamily: FZH, fontSize: 14, resize: "vertical" }} />
             </div>
           </div>
+          {busy && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ height: 8, background: C.surface2, borderRadius: 999, overflow: "hidden" }}>
+                <div style={{
+                  height: "100%",
+                  width: progress === "reading" ? "40%" : `${progress}%`,
+                  background: C.signal, borderRadius: 999,
+                  transition: "width .2s ease",
+                  opacity: progress === "reading" ? 0.5 : 1,
+                }} />
+              </div>
+              <div style={{ marginTop: 6, fontFamily: FMONO, fontSize: 12, color: C.muted }}>
+                {progress === "reading" ? "读取文件…" : `上传中 ${progress}%（大包约 90MB,请勿关闭）`}
+              </div>
+            </div>
+          )}
           <DialogFooter>
             <Button style={{ ...btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={doUpload}>
-              <Upload className="size-4 mr-1" />{busy ? "上传中…" : "上传（暂不发布）"}
+              <Upload className="size-4 mr-1" />
+              {busy ? (progress === "reading" ? "读取中…" : `上传中 ${progress}%`) : "上传（暂不发布）"}
             </Button>
           </DialogFooter>
         </DialogContent>
