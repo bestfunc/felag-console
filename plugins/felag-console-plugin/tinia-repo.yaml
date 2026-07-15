@@ -1,6 +1,7 @@
 name: 插件源管理
-version: 0.1.12
+version: 0.1.13
 description: Félag 数字员工 MCP 插件源注册/审核/分发治理
+group: Félag
 sdk:
   python: ">=3.11"
 table_prefix: plg_felagplugin_

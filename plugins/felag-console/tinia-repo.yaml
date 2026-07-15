@@ -1,6 +1,7 @@
 name: Skill 管理
-version: 0.1.1
+version: 0.1.2
 description: Félag 数字员工 skill 注册/审核/发布治理
+group: Félag
 sdk:
   python: ">=3.11"
 table_prefix: plg_felagskill_
