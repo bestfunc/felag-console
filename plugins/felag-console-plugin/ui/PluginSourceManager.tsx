@@ -171,6 +171,8 @@ export default function PluginSourceManager() {
   const [renaming, setRenaming] = useState<Source | null>(null);
   const [renameVal, setRenameVal] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
+  // 查看详情（git 地址/分支/包名收进弹窗，压窄表格）
+  const [viewing, setViewing] = useState<Source | null>(null);
   const [busy, setBusy] = useState(false);
   const [discovered, setDiscovered] = useState<{ name: string; version: string }[]>([]);
   const [branches, setBranches] = useState<string[]>([]);
@@ -299,17 +301,16 @@ export default function PluginSourceManager() {
         <Table>
           <TableHeader>
             <TableRow style={{ background: C.surface2 }}>
-              <TableHead style={thStyle}>Git 地址</TableHead><TableHead style={thStyle}>插件</TableHead>
+              <TableHead style={thStyle}>插件</TableHead>
               <TableHead style={thStyle}>版本</TableHead>
-              <TableHead style={thStyle}>分支</TableHead>
-              <TableHead style={thStyle}>作用域</TableHead><TableHead style={thStyle}>状态</TableHead>
-              <TableHead style={thStyle}></TableHead>
+              <TableHead style={thStyle}>作用域</TableHead>
+              <TableHead style={thStyle}>状态</TableHead>
+              <TableHead style={{ ...thStyle, textAlign: "right" }}>操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {sources.map((s) => (
               <TableRow key={s.id}>
-                <TableCell style={{ fontFamily: FMONO, fontSize: 13, color: C.ink }}>{s.git_url}</TableCell>
                 <TableCell>
                   <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.35 }}>
                     <span style={{ fontWeight: 600, color: C.ink }}>{s.display_name || s.plugin}</span>
@@ -323,11 +324,11 @@ export default function PluginSourceManager() {
                     ? <Badge style={pill(C.signal, C.signalTint)}>{"v" + s.git_version}</Badge>
                     : <span style={{ fontFamily: FMONO, fontSize: 13, color: C.muted }}>—</span>}
                 </TableCell>
-                <TableCell><Badge style={pill(C.body, C.surface2)}>{s.branch || "main"}</Badge></TableCell>
                 <TableCell><Badge style={pill(C.signal, C.signalTint)}>{scopeName(s.scope_ref)}</Badge></TableCell>
                 <TableCell><StatusBadge status={s.status} /></TableCell>
                 <TableCell>
-                  <div className="flex gap-2 justify-end">
+                  <div className="flex gap-2 justify-end" style={{ flexWrap: "wrap" }}>
+                    <Button variant="outline" size="sm" style={btnGhost} onClick={() => setViewing(s)}>查看</Button>
                     <Button variant="outline" size="sm" style={btnGhost} onClick={() => openRename(s)}>设置名称</Button>
                     {s.status === "draft" && (
                       <>
@@ -360,7 +361,7 @@ export default function PluginSourceManager() {
             ))}
             {sources.length === 0 && (
               <TableRow>
-                <TableCell colSpan={7}>
+                <TableCell colSpan={5}>
                   <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "32px 0", textAlign: "center" }}>暂无插件源</div>
                 </TableCell>
               </TableRow>
@@ -425,6 +426,34 @@ export default function PluginSourceManager() {
             <Button style={{ ...btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={doCreate}>
               <Plus className="size-4 mr-1" />{busy ? "提交中…" : "提交待审核"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!viewing} onOpenChange={(o) => { if (!o) setViewing(null); }}>
+        <DialogContent style={{ ...dialogStyle, maxWidth: 560 }}>
+          <DialogHeader>
+            <div style={eyebrow(6)}>DETAIL · 源详情</div>
+            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>{viewing?.display_name || viewing?.plugin}</DialogTitle>
+          </DialogHeader>
+          {viewing && (
+            <div className="space-y-3">
+              {[
+                { k: "插件包名", v: viewing.plugin, mono: true },
+                { k: "Git 地址", v: viewing.git_url, mono: true, breakAll: true },
+                { k: "分支", v: viewing.branch || "main", mono: true },
+              ].map((row) => (
+                <div key={row.k}>
+                  <Label style={labelStyle}>{row.k}</Label>
+                  <div style={{ fontFamily: row.mono ? FMONO : FZH, fontSize: 13, color: C.ink,
+                    background: C.surface2, border: `1px solid ${C.line}`, borderRadius: 12, padding: "9px 12px",
+                    wordBreak: row.breakAll ? "break-all" : "normal" }}>{row.v}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button style={btnPrimary} onClick={() => setViewing(null)}>关闭</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
