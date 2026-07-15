@@ -73,7 +73,7 @@ async function callNode<T>(node: string, params: object): Promise<T> {
 
 type Scope = { scope_ref: string; label: string; parent_ref?: string | null };
 type Source = {
-  id: number; git_url: string; plugin: string; scope_ref: string; branch: string; status: string;
+  id: number; git_url: string; plugin: string; display_name?: string | null; scope_ref: string; branch: string; status: string;
   created_by: string; reviewed_by: string | null; created_at?: string; reviewed_at?: string | null;
   git_version?: string | null; sync_requested_at?: string | null;
 };
@@ -166,7 +166,11 @@ export default function PluginSourceManager() {
   const [sources, setSources] = useState<Source[]>([]);
   const [scopes, setScopes] = useState<Scope[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState({ git_url: "", plugin: "", scope_ref: "", branch: "" });
+  const [form, setForm] = useState({ git_url: "", plugin: "", display_name: "", scope_ref: "", branch: "" });
+  // 设置名称（只改展示名）：编辑中的源 + 输入值
+  const [renaming, setRenaming] = useState<Source | null>(null);
+  const [renameVal, setRenameVal] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [discovered, setDiscovered] = useState<{ name: string; version: string }[]>([]);
   const [branches, setBranches] = useState<string[]>([]);
@@ -187,7 +191,7 @@ export default function PluginSourceManager() {
   const scopeName = (ref: string) => scopes.find((s) => s.scope_ref === ref)?.label || ref;
 
   function openCreate() {
-    setForm({ git_url: "", plugin: "", scope_ref: "", branch: "" });
+    setForm({ git_url: "", plugin: "", display_name: "", scope_ref: "", branch: "" });
     setDiscovered([]); setBranches([]); setCreateOpen(true);
   }
 
@@ -225,13 +229,14 @@ export default function PluginSourceManager() {
   async function doCreate() {
     const git_url = form.git_url.trim();
     const plugin = form.plugin.trim();
+    const display_name = form.display_name.trim();
     const branch = form.branch.trim() || "main";
     if (!git_url) { toast.error("请填 git_url"); return; }
     if (!plugin) { toast.error("请填 plugin"); return; }
     if (!form.scope_ref) { toast.error("请选择作用域"); return; }
     setBusy(true);
     try {
-      await callNode("plugin_source_create", { git_url, plugin, scope_ref: form.scope_ref, branch });
+      await callNode("plugin_source_create", { git_url, plugin, display_name, scope_ref: form.scope_ref, branch });
       toast.success("已提交待审核"); setCreateOpen(false); refresh();
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
@@ -251,6 +256,21 @@ export default function PluginSourceManager() {
       toast.success("已删除");
       refresh();
     } catch (e: any) { toast.error(e.message); }
+  }
+
+  // 设置名称:只改展示名,其它列不动;打开弹窗预填当前展示名
+  function openRename(s: Source) {
+    setRenaming(s); setRenameVal(s.display_name || "");
+  }
+  async function doRename() {
+    if (!renaming) return;
+    setRenameBusy(true);
+    try {
+      await callNode("plugin_source_rename", { source_id: renaming.id, display_name: renameVal.trim() });
+      toast.success(renaming.status === "approved" ? "已更新展示名，约 30 秒内下发到客户端" : "已更新展示名");
+      setRenaming(null); refresh();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setRenameBusy(false); }
   }
 
   // 请求立即同步:置 sync_requested_at,felag-server 快轮询(约 30s)拾取后重摄该源
@@ -290,7 +310,14 @@ export default function PluginSourceManager() {
             {sources.map((s) => (
               <TableRow key={s.id}>
                 <TableCell style={{ fontFamily: FMONO, fontSize: 13, color: C.ink }}>{s.git_url}</TableCell>
-                <TableCell style={{ fontWeight: 500, color: C.ink }}>{s.plugin}</TableCell>
+                <TableCell>
+                  <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.35 }}>
+                    <span style={{ fontWeight: 600, color: C.ink }}>{s.display_name || s.plugin}</span>
+                    {s.display_name
+                      ? <span style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>{s.plugin}</span>
+                      : null}
+                  </div>
+                </TableCell>
                 <TableCell>
                   {s.git_version
                     ? <Badge style={pill(C.signal, C.signalTint)}>{"v" + s.git_version}</Badge>
@@ -301,6 +328,7 @@ export default function PluginSourceManager() {
                 <TableCell><StatusBadge status={s.status} /></TableCell>
                 <TableCell>
                   <div className="flex gap-2 justify-end">
+                    <Button variant="outline" size="sm" style={btnGhost} onClick={() => openRename(s)}>设置名称</Button>
                     {s.status === "draft" && (
                       <>
                         <Button size="sm" style={{ ...btnPrimary, boxShadow: "none" }} onClick={() => review(s.id, "approve")}>
@@ -379,7 +407,16 @@ export default function PluginSourceManager() {
                 </Select>
               </div>
             )}
-            <div><Label style={labelStyle}>插件名</Label><Input style={inputStyle} value={form.plugin} onChange={(e) => setForm({ ...form, plugin: e.target.value })} placeholder="mcp 插件名（可手填，或点上方探测结果）" /></div>
+            <div>
+              <Label style={labelStyle}>插件包名</Label>
+              <Input style={inputStyle} value={form.plugin} onChange={(e) => setForm({ ...form, plugin: e.target.value })} placeholder="插件仓库里的技术包名（可手填，或点上方探测结果）" />
+              <div style={{ marginTop: 4, fontFamily: FMONO, fontSize: 12, color: C.muted }}>须与仓库 plugin.json 的 name 一致，摄取时会校验，不是给人看的名字</div>
+            </div>
+            <div>
+              <Label style={labelStyle}>展示名</Label>
+              <Input style={inputStyle} value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} placeholder="给人看的友好名（选填，如“智能质量”）；空则用包名" />
+              <div style={{ marginTop: 4, fontFamily: FMONO, fontSize: 12, color: C.muted }}>数字员工客户端的连接器卡片会显示这个名字</div>
+            </div>
             <div><Label style={labelStyle}>作用域</Label>
               <ScopeCascader scopes={scopes} value={form.scope_ref} onChange={(v) => setForm({ ...form, scope_ref: v })} />
             </div>
@@ -387,6 +424,33 @@ export default function PluginSourceManager() {
           <DialogFooter>
             <Button style={{ ...btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={doCreate}>
               <Plus className="size-4 mr-1" />{busy ? "提交中…" : "提交待审核"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!renaming} onOpenChange={(o) => { if (!o) setRenaming(null); }}>
+        <DialogContent style={{ ...dialogStyle, maxWidth: 480 }}>
+          <DialogHeader>
+            <div style={eyebrow(6)}>RENAME · 设置名称</div>
+            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>设置展示名</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>
+              插件包名 <span style={{ color: C.ink }}>{renaming?.plugin}</span> · 仅改展示名，其它不变
+            </div>
+            <div>
+              <Label style={labelStyle}>展示名</Label>
+              <Input style={inputStyle} value={renameVal} onChange={(e) => setRenameVal(e.target.value)}
+                placeholder="给人看的友好名（留空则用包名）" autoFocus
+                onKeyDown={(e) => { if (e.key === "Enter" && !renameBusy) doRename(); }} />
+              <div style={{ marginTop: 4, fontFamily: FMONO, fontSize: 12, color: C.muted }}>数字员工客户端的连接器卡片会显示这个名字</div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" style={btnGhost} onClick={() => setRenaming(null)}>取消</Button>
+            <Button style={{ ...btnPrimary, opacity: renameBusy ? 0.6 : 1 }} disabled={renameBusy} onClick={doRename}>
+              <Check className="size-4 mr-1" />{renameBusy ? "保存中…" : "保存"}
             </Button>
           </DialogFooter>
         </DialogContent>

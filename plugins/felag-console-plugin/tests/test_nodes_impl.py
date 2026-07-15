@@ -44,6 +44,37 @@ def test_review_reverse_check_and_cas(conn):
     with pytest.raises(N.NodeError):
         N.handle_plugin_source_review({"source_id": sid9, "action": "approve"}, conn, p, a)
 
+def test_rename_only_changes_display_name(conn):
+    p = StubProvider(["dept:1"]); a = Actor("u1")
+    sid = store.create_source(conn, "https://github.com/o/r", "p", "dept:1", "u1", branch="dev", display_name="旧名")
+    before = store.get_source(conn, sid)
+    out = N.handle_plugin_source_rename({"source_id": sid, "display_name": "新名"}, conn, p, a)
+    assert out["display_name"] == "新名"
+    after = store.get_source(conn, sid)
+    assert after["display_name"] == "新名"
+    # 其它列一律不变
+    for col in ("git_url", "plugin", "scope_ref", "branch", "status"):
+        assert after[col] == before[col]
+    # draft 源不触发同步
+    assert out["synced"] is False and after["sync_requested_at"] is None
+    # 清空 → 回退 NULL
+    N.handle_plugin_source_rename({"source_id": sid, "display_name": ""}, conn, p, a)
+    assert store.get_source(conn, sid)["display_name"] is None
+
+def test_rename_approved_triggers_sync(conn):
+    p = StubProvider(["dept:1"]); a = Actor("u1")
+    sid = store.create_source(conn, "g", "p", "dept:1", "u1")
+    store.review_source(conn, sid, "r"); conn.commit()
+    out = N.handle_plugin_source_rename({"source_id": sid, "display_name": "友好名"}, conn, p, a)
+    assert out["synced"] is True
+    assert store.get_source(conn, sid)["sync_requested_at"] is not None  # approved 改名触发快重摄
+
+def test_rename_reverse_check_out_of_scope(conn):
+    p = StubProvider(["dept:1"]); a = Actor("u1")
+    sid9 = store.create_source(conn, "g", "p9", "dept:9", "u1")
+    with pytest.raises(N.NodeError):   # 越 scope 改名 → 不暴露存在性
+        N.handle_plugin_source_rename({"source_id": sid9, "display_name": "x"}, conn, p, a)
+
 def test_list_only_manageable(conn):
     p = StubProvider(["dept:1"]); a = Actor("u1")
     store.create_source(conn, "g", "p1", "dept:1", "u1")

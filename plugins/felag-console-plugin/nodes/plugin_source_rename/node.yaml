@@ -1,0 +1,13 @@
+key: plugin_source_rename
+name: 设置插件源展示名
+description: 只改指定源的展示名(display_name),其它列一律不动;approved 源顺带触发快重摄(scope 反查鉴权)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 新展示名与是否已触发同步
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

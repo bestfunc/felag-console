@@ -3,6 +3,7 @@
   "properties": {
     "git_url": {"type": "string"},
     "plugin": {"type": "string"},
+    "display_name": {"type": "string"},
     "scope_ref": {"type": "string"}
   },
   "required": ["git_url", "plugin", "scope_ref"]

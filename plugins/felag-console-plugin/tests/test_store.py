@@ -5,6 +5,14 @@ def test_create_and_get(conn):
     row = store.get_source(conn, sid)
     assert row["git_url"].endswith("bi_plugins") and row["plugin"] == "daily-report-test"
     assert row["status"] == "draft" and row["scope_ref"] == "dept:1"
+    assert row["display_name"] is None       # 未填展示名 → NULL
+
+def test_display_name_roundtrip(conn):
+    sid = store.create_source(conn, "g", "p", "dept:1", "u1", display_name="智能质量")
+    assert store.get_source(conn, sid)["display_name"] == "智能质量"
+    # 空串归一为 NULL(下游据此回退用包名)
+    sid2 = store.create_source(conn, "g", "p2", "dept:1", "u1", display_name="")
+    assert store.get_source(conn, sid2)["display_name"] is None
 
 def test_review_cas(conn):
     sid = store.create_source(conn, "g", "p", "dept:1", "u1")

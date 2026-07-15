@@ -60,6 +60,7 @@ def handle_actor_context(params, conn, provider, actor) -> dict:
 def handle_plugin_source_create(params, conn, provider, actor) -> dict:
     git_url = (params.get("git_url") or "").strip()
     plugin = (params.get("plugin") or "").strip()
+    display_name = (params.get("display_name") or "").strip()  # 展示名,可空(空时下游回退用 plugin 包名)
     scope_ref = (params.get("scope_ref") or "").strip()
     branch = (params.get("branch") or "").strip() or "main"
     if not (git_url and plugin and scope_ref):
@@ -67,12 +68,12 @@ def handle_plugin_source_create(params, conn, provider, actor) -> dict:
     if not provider.can_manage_scope(actor, scope_ref):   # 建：唯一信任 params.scope_ref（反查该 scope）
         raise NodeError("无权在该作用域建插件源")
     try:
-        sid = store.create_source(conn, git_url, plugin, scope_ref, actor.user_id, branch=branch)
+        sid = store.create_source(conn, git_url, plugin, scope_ref, actor.user_id, branch=branch, display_name=display_name)
     except psycopg2.errors.UniqueViolation as e:
         conn.rollback()
         raise NodeError(f"插件源 (git,plugin,scope,branch) 已存在：{e}") from e
     store.add_audit(conn, actor.user_id, scope_ref, "source.create", f"source:{sid}",
-                    {"git_url": git_url, "plugin": plugin, "branch": branch})
+                    {"git_url": git_url, "plugin": plugin, "display_name": display_name, "branch": branch})
     conn.commit()
     return {"id": sid}
 
@@ -109,6 +110,23 @@ def handle_plugin_source_delete(params, conn, provider, actor) -> dict:
     store.add_audit(conn, actor.user_id, row["scope_ref"], "source.delete", f"source:{source_id}", {})
     conn.commit()
     return {"deleted": True}
+
+def handle_plugin_source_rename(params, conn, provider, actor) -> dict:
+    """只改展示名,其它列一律不动(scope 反查鉴权)。展示名可空(清空=回退用包名)。
+    对 approved 源顺带置 sync_requested_at,让 felag-server 快轮询重摄、新名尽快下发到客户端。"""
+    source_id = params.get("source_id")
+    display_name = (params.get("display_name") or "").strip()
+    row = _load_owned(conn, provider, actor, source_id)
+    if not store.set_display_name(conn, source_id, display_name):
+        conn.rollback()
+        raise NodeError("插件源不存在,请刷新")
+    synced = False
+    if row["status"] == "approved":
+        synced = store.request_sync(conn, source_id)  # 改名后触发快重摄,新名尽快下发
+    store.add_audit(conn, actor.user_id, row["scope_ref"], "source.rename", f"source:{source_id}",
+                    {"display_name": display_name})
+    conn.commit()
+    return {"display_name": display_name, "synced": synced}
 
 def handle_plugin_source_sync(params, conn, provider, actor) -> dict:
     """请求立即同步:置该源 sync_requested_at=now(),felag-server 快轮询拾取后立即重摄。

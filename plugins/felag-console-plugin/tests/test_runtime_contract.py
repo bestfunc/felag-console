@@ -2,7 +2,8 @@ import pathlib, yaml, json
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 NODES = ["actor_context", "plugin_source_list", "plugin_source_create",
-         "plugin_source_review", "plugin_source_delete", "plugin_discover", "audit_list"]
+         "plugin_source_review", "plugin_source_delete", "plugin_source_sync",
+         "plugin_source_rename", "plugin_discover", "audit_list"]
 
 def test_all_nodes_declared_in_repo():
     repo = yaml.safe_load((ROOT / "tinia-repo.yaml").read_text(encoding="utf-8"))
@@ -22,7 +23,8 @@ def test_each_node_has_contract_files():
 def test_run_py_imports_matching_handler():
     hmap = {"actor_context": "handle_actor_context", "plugin_source_list": "handle_plugin_source_list",
             "plugin_source_create": "handle_plugin_source_create", "plugin_source_review": "handle_plugin_source_review",
-            "plugin_source_delete": "handle_plugin_source_delete", "plugin_discover": "handle_plugin_discover",
+            "plugin_source_delete": "handle_plugin_source_delete", "plugin_source_sync": "handle_plugin_source_sync",
+            "plugin_source_rename": "handle_plugin_source_rename", "plugin_discover": "handle_plugin_discover",
             "audit_list": "handle_audit_list"}
     for k, h in hmap.items():
         src = (ROOT / "nodes" / k / "runtime" / "run.py").read_text(encoding="utf-8")
