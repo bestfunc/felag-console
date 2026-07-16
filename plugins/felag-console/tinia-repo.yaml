@@ -1,7 +1,9 @@
 name: Skill 管理
-version: 0.1.2
+version: 0.1.3
 description: Félag 数字员工 skill 注册/审核/发布治理
 group: Félag
+name_i18n:
+  en: Skill Management
 sdk:
   python: ">=3.11"
 table_prefix: plg_felagskill_
@@ -10,6 +12,17 @@ migrations:
 required_dbs:
   - alias: platform_pg
     description: 平台 PG（daily_report 库，skill 管理表所在；本期用超管 dr 凭据 id=121）
+# MCP 能力暴露(§10):只暴露只读查询节点。
+# 治理写操作(skill_review/skill_deprecate/skill_upload_version/version_delete)刻意不暴露
+# —— 它们是不可逆治理动作,应由人在 UI 里做,不给外部 AI 误调的机会。
+# skill_create 亦不可暴露:它缺 schemas/params.schema.json,一旦 expose 会 build 失败。
+# actor_context 是内部上下文助手,对 AI 无意义。
+mcp:
+  expose:
+    - skill_list
+    - skill_detail
+    - version_files
+    - audit_list
 modules:
   nodes:
     - actor_context

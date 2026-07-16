@@ -1,7 +1,9 @@
 name: 客户端版本管理
-version: 0.1.3
+version: 0.1.4
 description: Félag 数字员工客户端(felag-client)安装包发布/回滚/删除治理，双平台(Windows/macOS)独立当前版
 group: Félag
+name_i18n:
+  en: Client Releases
 sdk:
   python: ">=3.11"
 table_prefix: plg_felagapp_
@@ -10,6 +12,12 @@ migrations:
 required_dbs:
   - alias: platform_pg
     description: 平台 PG（daily_report 库，客户端发布表所在；用超管 dr 凭据 id=121）
+# MCP 能力暴露(§10):只暴露只读的版本列表。
+# upload/publish/delete 刻意不暴露 —— 给客户端下发/回滚安装包是高危不可逆动作,
+# 必须人工在 UI 里确认,绝不给外部 AI 调用入口。
+mcp:
+  expose:
+    - release_list
 modules:
   nodes:
     - release_list
@@ -22,5 +30,6 @@ modules:
       path: ui/AppReleaseManager.tsx
       title: 客户端版本管理
       menu_label: 客户端版本
-      menu_icon: Rocket
+      # Rocket 不在平台 41 个图标白名单内 → 此前侧栏一直缺图标。
+      menu_icon: Send
       menu_order: 52

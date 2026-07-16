@@ -1,7 +1,9 @@
 name: 插件源管理
-version: 0.1.13
+version: 0.1.14
 description: Félag 数字员工 MCP 插件源注册/审核/分发治理
 group: Félag
+name_i18n:
+  en: Plugin Sources
 sdk:
   python: ">=3.11"
 table_prefix: plg_felagplugin_
@@ -15,6 +17,14 @@ migrations:
 required_dbs:
   - alias: platform_pg
     description: 平台 PG（daily_report 库，插件源管理表所在；用超管 dr 凭据 id=121）
+# MCP 能力暴露(§10):只暴露只读查询/探测节点。
+# 写操作(create/review/delete/rename/sync)刻意不暴露 —— 审核与同步是治理动作,
+# 由人在 UI 里做;actor_context 是内部上下文助手,对 AI 无意义。
+mcp:
+  expose:
+    - plugin_source_list
+    - plugin_discover
+    - audit_list
 modules:
   nodes:
     - actor_context
@@ -32,5 +42,6 @@ modules:
       path: ui/PluginSourceManager.tsx
       title: 插件源管理
       menu_label: 插件源管理
-      menu_icon: Boxes
+      # Boxes 不在平台 41 个图标白名单内(只有 Blocks/Box)→ 此前侧栏一直缺图标。
+      menu_icon: GitBranch
       menu_order: 51
