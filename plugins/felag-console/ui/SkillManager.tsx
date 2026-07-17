@@ -1,10 +1,76 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { Button, Input, Label, Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Badge, toast,
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@platform/ui";
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, useCurrentLanguage } from "@platform/ui";
 import { Plus, RefreshCw, Check, X, Trash2, Upload, FileText, FolderOpen } from "lucide-react";
 
 const SLUG = "felag-console";
+
+// ── i18n(PD_001_30):单文件 tsx 插件自带轻量语言包;useCurrentLanguage() 随平台切换响应式返回 'zh'|'en'。
+//    子组件(StatusBadge/ScopeCascader)各自调 useCurrentLanguage();模块级函数(callNode/tarHeader)拿不到 hook,传 t。 ──
+const I18N = {
+  zh: {
+    reqFail: "请求失败",
+    pathTooLong: (name: string) => `路径过长(>100字节)，无法打包：${name}`,
+    title: "Skill 管理", refresh: "刷新", newSkill: "新建 Skill",
+    thName: "名称", thScope: "作用域", thStatus: "状态", pending: "待审",
+    pendingN: (n: number) => `${n} 待审`,
+    review: "审核", detail: "详情", noSkills: "暂无 Skill",
+    needName: "请填 skill 名称", needScope: "请选择作用域", needFiles: "请拖入 skill 目录或文件",
+    tooBig: (mb: string) => `文件总量 ${mb}MB 超 8MB 上限`,
+    submitted: (n: number) => `已提交待审核（${n} 个文件）`,
+    published: "已发布", rejected: "已驳回", deprecated: "已下架", normal: "正常",
+    inputEyebrow: "INPUT · 输入",
+    namePlaceholder: "skill 目录名，如 ops-runbook",
+    fldVersion: "版本号",
+    filesLabel: "SKILL 文件（一个目录 / 多文件，浏览器自动打包）",
+    dropHint: "拖拽 skill 目录或多个文件到此",
+    orClick: "或点击选择文件 · ", pickDir: "选择整个目录",
+    filesN: (n: number) => `${n} 个文件`, clear: "清空",
+    submitting: "提交中…", submitReview: "提交待审核",
+    detailEyebrow: "DETAIL · 详情", selectVersion: "选择版本",
+    fileCount: "文件数", sizeLabel: "大小", uploadedBy: "上传人", timeLabel: "时间",
+    loading: "加载中…", emptyPkg: "空包", pickFileHint: "选择左侧文件查看",
+    binaryFile: (kb: string) => `二进制文件，不可预览（${kb} KB）`,
+    emptyFile: "（空文件）", pretty: "美化", source: "源码",
+    approvePublish: "通过发布", reject: "驳回", deprecateBtn: "下架",
+    colEmpty: "（空）", selAllDepts: "选中=全部部门", selAllPos: "选中=全部岗位",
+    unitDept: "部门", unitPos: "岗位", dotAllDepts: " · 全部部门", dotAllPos: " · 全部岗位",
+    selectedPrefix: (label: string) => `已选：${label}`,
+    cascaderHint: "点部门=选其“全部岗位”，含下级会自动展开右侧供细选",
+  },
+  en: {
+    reqFail: "Request failed",
+    pathTooLong: (name: string) => `Path too long (>100 bytes), cannot pack: ${name}`,
+    title: "Skill Management", refresh: "Refresh", newSkill: "New Skill",
+    thName: "Name", thScope: "Scope", thStatus: "Status", pending: "Pending",
+    pendingN: (n: number) => `${n} pending`,
+    review: "Review", detail: "Details", noSkills: "No skills yet",
+    needName: "Please enter a skill name", needScope: "Please choose a scope", needFiles: "Please drop a skill folder or files",
+    tooBig: (mb: string) => `Total ${mb}MB exceeds the 8MB limit`,
+    submitted: (n: number) => `Submitted for review (${n} files)`,
+    published: "Published", rejected: "Rejected", deprecated: "Deprecated", normal: "Active",
+    inputEyebrow: "INPUT",
+    namePlaceholder: "skill folder name, e.g. ops-runbook",
+    fldVersion: "Version",
+    filesLabel: "SKILL files (one folder / multiple files, packed in browser)",
+    dropHint: "Drop a skill folder or multiple files here",
+    orClick: "or click to choose files · ", pickDir: "choose a whole folder",
+    filesN: (n: number) => `${n} files`, clear: "Clear",
+    submitting: "Submitting…", submitReview: "Submit for review",
+    detailEyebrow: "DETAIL", selectVersion: "Choose version",
+    fileCount: "Files", sizeLabel: "Size", uploadedBy: "Uploaded by", timeLabel: "Time",
+    loading: "Loading…", emptyPkg: "Empty package", pickFileHint: "Pick a file on the left to view",
+    binaryFile: (kb: string) => `Binary file, no preview (${kb} KB)`,
+    emptyFile: "(empty file)", pretty: "Rendered", source: "Source",
+    approvePublish: "Approve & publish", reject: "Reject", deprecateBtn: "Deprecate",
+    colEmpty: "(empty)", selAllDepts: "select = all departments", selAllPos: "select = all positions",
+    unitDept: "dept.", unitPos: "pos.", dotAllDepts: " · all departments", dotAllPos: " · all positions",
+    selectedPrefix: (label: string) => `Selected: ${label}`,
+    cascaderHint: "Click a department to select all its positions; nodes with children expand on the right for finer selection",
+  },
+};
+type Dict = typeof I18N.zh;
 
 // ── Ice Blue Enterprise 品牌值（bestfunc-design skill §1/§2/§5）──
 // 平台 Tailwind 预编译、不认插件新加的具名 token → 品牌值走内联 style（运行时插件里稳定渲染）。
@@ -57,14 +123,14 @@ const dialogStyle: React.CSSProperties = {
   fontFamily: FZH, width: "94vw", maxWidth: 640, maxHeight: "88vh", overflowY: "auto",
 };
 
-async function callNode<T>(node: string, params: object): Promise<T> {
+async function callNode<T>(node: string, params: object, t: Dict): Promise<T> {
   const resp = await fetch(`/api/dag/${SLUG}/${node}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params),
   });
   const env = await resp.json();
   const first = env?.data?.results?.[0];
   if (env?.code !== 0 || first?.error) {
-    const raw = first?.error || env?.message || "请求失败";
+    const raw = first?.error || env?.message || t.reqFail;
     const m = String(raw).match(/(?:ValueError|RuntimeError|NodeError|TypeError):\s*([^\n]+)/);
     throw new Error(m ? m[1].trim() : String(raw));
   }
@@ -78,9 +144,9 @@ type Picked = { rel: string; file: File };
 function octalField(n: number, width: number): Uint8Array {
   return new TextEncoder().encode(n.toString(8).padStart(width - 1, "0") + "\0");
 }
-function tarHeader(name: string, size: number): Uint8Array {
+function tarHeader(name: string, size: number, t: Dict): Uint8Array {
   const nb = new TextEncoder().encode(name);
-  if (nb.length > 100) throw new Error(`路径过长(>100字节)，无法打包：${name}`);
+  if (nb.length > 100) throw new Error(t.pathTooLong(name));
   const h = new Uint8Array(512);
   h.set(nb, 0);
   h.set(octalField(0o644, 8), 100);   // mode
@@ -96,10 +162,10 @@ function tarHeader(name: string, size: number): Uint8Array {
   h.set(new TextEncoder().encode(chk.toString(8).padStart(6, "0") + "\0 "), 148);
   return h;
 }
-function buildTar(files: { name: string; data: Uint8Array }[]): Uint8Array {
+function buildTar(files: { name: string; data: Uint8Array }[], t: Dict): Uint8Array {
   const parts: Uint8Array[] = [];
   for (const f of files) {
-    parts.push(tarHeader(f.name, f.data.length), f.data);
+    parts.push(tarHeader(f.name, f.data.length, t), f.data);
     const rem = f.data.length % 512;
     if (rem) parts.push(new Uint8Array(512 - rem));
   }
@@ -226,14 +292,16 @@ type Version = { id: number; version: string; review_status: string; self_review
 type PkgFile = { path: string; size: number; is_text: boolean; text?: string };
 
 function StatusBadge({ status }: { status: string }) {
+  const t = I18N[useCurrentLanguage()];
   return status === "deprecated"
-    ? <Badge style={pill(C.ng, C.ngTint)}>已下架</Badge>
-    : <Badge style={pill(C.ok, C.okTint)}>正常</Badge>;
+    ? <Badge style={pill(C.ng, C.ngTint)}>{t.deprecated}</Badge>
+    : <Badge style={pill(C.ok, C.okTint)}>{t.normal}</Badge>;
 }
 
 // 作用域列式级联(changeOnSelect):点任一节点=直接选中它(总部=全部部门 / 部门=该部门全部岗位 / 岗位=该岗位),
 // 含子级的节点点选后右侧自动展开供细选,无需再点三角。右侧件数徽章提示"还能往下选"(用 mono 文本非符号图标,合白名单)。
 function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: string; onChange: (ref: string) => void }) {
+  const t = I18N[useCurrentLanguage()];
   const [path, setPath] = useState<string[]>([]);
   const refset = new Set(scopes.map((s) => s.scope_ref));
   const byRef: Record<string, Scope> = {};
@@ -248,7 +316,7 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
 
   const selLabel = (ref: string): string => {
     const n = byRef[ref]; if (!n) return ref;
-    if (isDept(ref)) return n.label + (isRoot(n) ? " · 全部部门" : " · 全部岗位");
+    if (isDept(ref)) return n.label + (isRoot(n) ? t.dotAllDepts : t.dotAllPos);
     const par = n.parent_ref ? byRef[n.parent_ref] : undefined;
     return (par ? par.label + " / " : "") + n.label;
   };
@@ -267,7 +335,7 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
           {columns.map((col, ci) => (
             <div key={ci} style={{ flex: "0 0 162px", width: 162, maxHeight: 248, overflowY: "auto",
               borderRight: ci < columns.length - 1 ? `1px solid ${C.surface2}` : "none" }}>
-              {col.length === 0 && <div style={{ padding: 10, fontFamily: FMONO, fontSize: 12, color: C.muted }}>（空）</div>}
+              {col.length === 0 && <div style={{ padding: 10, fontFamily: FMONO, fontSize: 12, color: C.muted }}>{t.colEmpty}</div>}
               {col.map((n) => {
                 const kids = childrenOf(n.scope_ref);
                 const dept = isDept(n.scope_ref);
@@ -284,7 +352,7 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
                       <span style={{ fontWeight: selected ? 700 : 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
                       {dept && (
                         <span style={{ fontFamily: FMONO, fontSize: 12, color: C.muted, letterSpacing: ".02em" }}>
-                          {isRoot(n) ? "选中=全部部门" : "选中=全部岗位"}
+                          {isRoot(n) ? t.selAllDepts : t.selAllPos}
                         </span>
                       )}
                     </span>
@@ -292,7 +360,7 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
                       <span style={{ flexShrink: 0, fontFamily: FMONO, fontSize: 12, letterSpacing: ".02em",
                         color: opened ? C.signal : C.muted, background: opened ? C.blueTint : C.surface2,
                         border: `1px solid ${opened ? C.signal + "55" : C.line}`, borderRadius: 999, padding: "1px 7px" }}>
-                        {kids.length} {isRoot(n) ? "部门" : "岗位"}
+                        {kids.length} {isRoot(n) ? t.unitDept : t.unitPos}
                       </span>
                     )}
                   </div>
@@ -303,13 +371,14 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
         </div>
       </div>
       <div style={{ marginTop: 6, fontFamily: FMONO, fontSize: 12, color: value ? C.signal : C.muted }}>
-        {value ? `已选：${selLabel(value)}` : "点部门=选其“全部岗位”，含下级会自动展开右侧供细选"}
+        {value ? t.selectedPrefix(selLabel(value)) : t.cascaderHint}
       </div>
     </div>
   );
 }
 
 export default function SkillManager() {
+  const t = I18N[useCurrentLanguage()];
   const [skills, setSkills] = useState<Skill[]>([]);
   const [scopes, setScopes] = useState<Scope[]>([]);
   const [detail, setDetail] = useState<{ skill: Skill; versions: Version[] } | null>(null);
@@ -327,12 +396,12 @@ export default function SkillManager() {
 
   const refresh = useCallback(async () => {
     try {
-      const ctx = await callNode<{ manageable_scopes: Scope[] }>("actor_context", {});
+      const ctx = await callNode<{ manageable_scopes: Scope[] }>("actor_context", {}, t);
       setScopes(ctx.manageable_scopes);
-      const r = await callNode<{ skills: Skill[] }>("skill_list", {});
+      const r = await callNode<{ skills: Skill[] }>("skill_list", {}, t);
       setSkills(r.skills);
     } catch (e: any) { toast.error(e.message); }
-  }, []);
+  }, [t]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -360,7 +429,7 @@ export default function SkillManager() {
   async function loadVerFiles(v: Version) {
     setSelVer(v); setVerFiles(null); setSelFile(null);
     try {
-      const r = await callNode<{ files: PkgFile[] }>("version_files", { version_id: v.id });
+      const r = await callNode<{ files: PkgFile[] }>("version_files", { version_id: v.id }, t);
       setVerFiles(r.files);
       const md = r.files.find((f) => /(^|\/)SKILL\.md$/i.test(f.path));
       setSelFile(md || r.files.find((f) => f.is_text) || r.files[0] || null);
@@ -369,7 +438,7 @@ export default function SkillManager() {
   }
   async function openDetail(id: number) {
     try {
-      const d = await callNode<{ skill: Skill; versions: Version[] }>("skill_detail", { skill_id: id });
+      const d = await callNode<{ skill: Skill; versions: Version[] }>("skill_detail", { skill_id: id }, t);
       setDetail(d);
       if (d.versions[0]) loadVerFiles(d.versions[0]); else { setSelVer(null); setVerFiles(null); setSelFile(null); }
     } catch (e: any) { toast.error(e.message); }
@@ -382,9 +451,9 @@ export default function SkillManager() {
   );
   async function doCreate() {
     const name = form.name.trim();
-    if (!name) { toast.error("请填 skill 名称"); return; }
-    if (!form.scope_ref) { toast.error("请选择作用域"); return; }
-    if (!picked.length) { toast.error("请拖入 skill 目录或文件"); return; }
+    if (!name) { toast.error(t.needName); return; }
+    if (!form.scope_ref) { toast.error(t.needScope); return; }
+    if (!picked.length) { toast.error(t.needFiles); return; }
     setBusy(true);
     try {
       // 全部文件重挂到 ${name}/ 下（顶层目录 == skill 名，后端强校验）
@@ -394,33 +463,35 @@ export default function SkillManager() {
         files.push({ name: `${name}/${inner}`, data: new Uint8Array(await file.arrayBuffer()) });
       }
       // 只暂存未压缩 tar（不 gzip）；审核通过时后端才打包成分发用 tar.gz
-      const tar = buildTar(files);
-      if (tar.length > 8 * 1024 * 1024) throw new Error(`文件总量 ${(tar.length / 1048576).toFixed(2)}MB 超 8MB 上限`);
-      await callNode("skill_create", { name, scope_ref: form.scope_ref, version: form.version, content_b64: toB64(tar) });
-      toast.success(`已提交待审核（${files.length} 个文件）`); setCreateOpen(false); refresh();
+      const tar = buildTar(files, t);
+      if (tar.length > 8 * 1024 * 1024) throw new Error(t.tooBig((tar.length / 1048576).toFixed(2)));
+      await callNode("skill_create", { name, scope_ref: form.scope_ref, version: form.version, content_b64: toB64(tar) }, t);
+      toast.success(t.submitted(files.length)); setCreateOpen(false); refresh();
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   }
   async function review(version_id: number, action: "approve" | "reject") {
-    try { await callNode("skill_review", { version_id, action }); toast.success(action === "approve" ? "已发布" : "已驳回");
+    try { await callNode("skill_review", { version_id, action }, t); toast.success(action === "approve" ? t.published : t.rejected);
       if (detail) openDetail(detail.skill.id); refresh(); }
     catch (e: any) { toast.error(e.message); }
   }
   async function deprecate(id: number) {
-    try { await callNode("skill_deprecate", { skill_id: id }); toast.success("已下架"); setDetail(null); refresh(); }
+    try { await callNode("skill_deprecate", { skill_id: id }, t); toast.success(t.deprecated); setDetail(null); refresh(); }
     catch (e: any) { toast.error(e.message); }
   }
+
+  const verStatusText = (s: string) => s === "published" ? t.published : s === "rejected" ? t.rejected : t.pending;
 
   return (
     <div className="px-8 py-6 space-y-5" style={{ background: AURORA, minHeight: "100%", fontFamily: FZH }}>
       <div className="flex items-end justify-between">
         <div>
           <div style={eyebrow(4)}>SKILL GOVERNANCE</div>
-          <h1 style={{ fontFamily: FZH, fontWeight: 800, fontSize: 26, color: C.ink, letterSpacing: "-0.02em" }}>Skill 管理</h1>
+          <h1 style={{ fontFamily: FZH, fontWeight: 800, fontSize: 26, color: C.ink, letterSpacing: "-0.02em" }}>{t.title}</h1>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" style={btnGhost} onClick={refresh}><RefreshCw className="size-4 mr-1" />刷新</Button>
-          <Button style={btnPrimary} onClick={openCreate}><Plus className="size-4 mr-1" />新建 Skill</Button>
+          <Button variant="outline" style={btnGhost} onClick={refresh}><RefreshCw className="size-4 mr-1" />{t.refresh}</Button>
+          <Button style={btnPrimary} onClick={openCreate}><Plus className="size-4 mr-1" />{t.newSkill}</Button>
         </div>
       </div>
 
@@ -428,8 +499,8 @@ export default function SkillManager() {
         <Table>
           <TableHeader>
             <TableRow style={{ background: C.surface2 }}>
-              <TableHead style={thStyle}>名称</TableHead><TableHead style={thStyle}>作用域</TableHead>
-              <TableHead style={thStyle}>状态</TableHead><TableHead style={thStyle}>待审</TableHead>
+              <TableHead style={thStyle}>{t.thName}</TableHead><TableHead style={thStyle}>{t.thScope}</TableHead>
+              <TableHead style={thStyle}>{t.thStatus}</TableHead><TableHead style={thStyle}>{t.pending}</TableHead>
               <TableHead style={thStyle}></TableHead>
             </TableRow>
           </TableHeader>
@@ -441,17 +512,17 @@ export default function SkillManager() {
                 <TableCell><StatusBadge status={s.status} /></TableCell>
                 <TableCell>
                   {s.pending_count > 0
-                    ? <Badge style={{ color: C.warnText, background: C.warnBg, border: `1px solid ${C.warnBorder}66`, fontFamily: FMONO, fontSize: 12, borderRadius: 999 }}>{s.pending_count} 待审</Badge>
+                    ? <Badge style={{ color: C.warnText, background: C.warnBg, border: `1px solid ${C.warnBorder}66`, fontFamily: FMONO, fontSize: 12, borderRadius: 999 }}>{t.pendingN(s.pending_count)}</Badge>
                     : <span style={{ color: C.muted }}>—</span>}
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-2 justify-end">
                     {s.pending_count > 0 && (
                       <Button size="sm" style={{ ...btnPrimary, boxShadow: "none" }} onClick={() => openDetail(s.id)}>
-                        <Check className="size-4 mr-1" />审核
+                        <Check className="size-4 mr-1" />{t.review}
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" style={{ color: C.signal, fontFamily: FZH, fontWeight: 600 }} onClick={() => openDetail(s.id)}>详情</Button>
+                    <Button variant="ghost" size="sm" style={{ color: C.signal, fontFamily: FZH, fontWeight: 600 }} onClick={() => openDetail(s.id)}>{t.detail}</Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -459,7 +530,7 @@ export default function SkillManager() {
             {skills.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5}>
-                  <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "32px 0", textAlign: "center" }}>暂无 Skill</div>
+                  <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "32px 0", textAlign: "center" }}>{t.noSkills}</div>
                 </TableCell>
               </TableRow>
             )}
@@ -470,18 +541,18 @@ export default function SkillManager() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent style={dialogStyle}>
           <DialogHeader>
-            <div style={eyebrow(6)}>INPUT · 输入</div>
-            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>新建 Skill</DialogTitle>
+            <div style={eyebrow(6)}>{t.inputEyebrow}</div>
+            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>{t.newSkill}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <div><Label style={labelStyle}>名称</Label><Input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="skill 目录名，如 ops-runbook" /></div>
-            <div><Label style={labelStyle}>作用域</Label>
+            <div><Label style={labelStyle}>{t.thName}</Label><Input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t.namePlaceholder} /></div>
+            <div><Label style={labelStyle}>{t.thScope}</Label>
               <ScopeCascader scopes={scopes} value={form.scope_ref} onChange={(v) => setForm({ ...form, scope_ref: v })} />
             </div>
-            <div><Label style={labelStyle}>版本号</Label><Input style={inputStyle} value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} /></div>
+            <div><Label style={labelStyle}>{t.fldVersion}</Label><Input style={inputStyle} value={form.version} onChange={(e) => setForm({ ...form, version: e.target.value })} /></div>
 
             <div>
-              <Label style={labelStyle}>SKILL 文件（一个目录 / 多文件，浏览器自动打包）</Label>
+              <Label style={labelStyle}>{t.filesLabel}</Label>
               {/* 拖拽区：拖目录或多文件到此，或点击选择 */}
               <div
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -495,11 +566,11 @@ export default function SkillManager() {
                 }}
               >
                 <Upload className="size-6 mx-auto" style={{ color: C.signal }} />
-                <div style={{ color: C.body, fontFamily: FZH, fontSize: 14, marginTop: 8 }}>拖拽 skill 目录或多个文件到此</div>
+                <div style={{ color: C.body, fontFamily: FZH, fontSize: 14, marginTop: 8 }}>{t.dropHint}</div>
                 <div style={{ color: C.muted, fontSize: 12, marginTop: 4 }}>
-                  或点击选择文件 ·{" "}
+                  {t.orClick}
                   <span style={{ color: C.signal, textDecoration: "underline" }}
-                        onClick={(e) => { e.stopPropagation(); dirRef.current?.click(); }}>选择整个目录</span>
+                        onClick={(e) => { e.stopPropagation(); dirRef.current?.click(); }}>{t.pickDir}</span>
                 </div>
               </div>
               <input ref={fileRef} type="file" multiple style={{ display: "none" }}
@@ -511,8 +582,8 @@ export default function SkillManager() {
               {picked.length > 0 && (
                 <div style={{ marginTop: 8, border: `1px solid ${C.line}`, borderRadius: 14, background: C.surface, overflow: "hidden" }}>
                   <div className="flex items-center justify-between" style={{ padding: "8px 12px", borderBottom: `1px solid ${C.line}` }}>
-                    <span style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>{picked.length} 个文件</span>
-                    <button onClick={() => setPicked([])} style={{ fontFamily: FZH, fontSize: 12, color: C.ng, background: "none", border: "none", cursor: "pointer" }}>清空</button>
+                    <span style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>{t.filesN(picked.length)}</span>
+                    <button onClick={() => setPicked([])} style={{ fontFamily: FZH, fontSize: 12, color: C.ng, background: "none", border: "none", cursor: "pointer" }}>{t.clear}</button>
                   </div>
                   <div style={{ maxHeight: 132, overflowY: "auto" }}>
                     {picked.map((p) => (
@@ -532,7 +603,7 @@ export default function SkillManager() {
           </div>
           <DialogFooter>
             <Button style={{ ...btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={doCreate}>
-              <Upload className="size-4 mr-1" />{busy ? "提交中…" : "提交待审核"}
+              <Upload className="size-4 mr-1" />{busy ? t.submitting : t.submitReview}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -542,17 +613,17 @@ export default function SkillManager() {
         <DialogContent style={{ ...dialogStyle, width: "90vw", maxWidth: 880, boxSizing: "border-box", overflowX: "hidden" }}>
           <style>{MD_CSS}</style>
           <DialogHeader>
-            <div style={eyebrow(6)}>DETAIL · 详情</div>
+            <div style={eyebrow(6)}>{t.detailEyebrow}</div>
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>{detail?.skill.name}</DialogTitle>
               {/* 版本选择器：审核和文档同屏，换版本即换文档 */}
               <Select value={selVer ? String(selVer.id) : ""}
                       onValueChange={(v) => { const ver = detail?.versions.find((x) => String(x.id) === v); if (ver) loadVerFiles(ver); }}>
-                <SelectTrigger style={{ ...inputStyle, width: 240 }}><SelectValue placeholder="选择版本" /></SelectTrigger>
+                <SelectTrigger style={{ ...inputStyle, width: 240 }}><SelectValue placeholder={t.selectVersion} /></SelectTrigger>
                 <SelectContent>
                   {detail?.versions.map((v) => (
                     <SelectItem key={v.id} value={String(v.id)}>
-                      {v.version} · {v.review_status === "published" ? "已发布" : v.review_status === "rejected" ? "已驳回" : "待审"}
+                      {v.version} · {verStatusText(v.review_status)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -563,11 +634,11 @@ export default function SkillManager() {
           {selVer && (
             <div className="flex flex-wrap gap-x-5 gap-y-1">
               {([
-                ["状态", selVer.review_status === "published" ? "已发布" : selVer.review_status === "rejected" ? "已驳回" : "待审"],
-                ["文件数", verFiles ? String(verFiles.length) : "…"],
-                ["大小", selVer.size_bytes != null ? `${(selVer.size_bytes / 1024).toFixed(1)} KB` : "—"],
-                ["上传人", selVer.uploaded_by || "—"],
-                ["时间", (selVer.created_at || "").replace("T", " ").slice(0, 16) || "—"],
+                [t.thStatus, verStatusText(selVer.review_status)],
+                [t.fileCount, verFiles ? String(verFiles.length) : "…"],
+                [t.sizeLabel, selVer.size_bytes != null ? `${(selVer.size_bytes / 1024).toFixed(1)} KB` : "—"],
+                [t.uploadedBy, selVer.uploaded_by || "—"],
+                [t.timeLabel, (selVer.created_at || "").replace("T", " ").slice(0, 16) || "—"],
               ] as [string, string][]).map(([k, v]) => (
                 <div key={k}>
                   <span style={{ fontFamily: FMONO, fontSize: 11, letterSpacing: ".12em", textTransform: "uppercase", color: C.muted }}>{k}</span>
@@ -579,11 +650,11 @@ export default function SkillManager() {
 
           {/* 文件列表（左，支持多文件）+ 内容（右，.md 可美化/源码切换）*/}
           {verFiles === null ? (
-            <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "40px 0", textAlign: "center" }}>加载中…</div>
+            <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "40px 0", textAlign: "center" }}>{t.loading}</div>
           ) : (
             <div className="flex gap-3" style={{ height: "52vh", minHeight: 260, minWidth: 0, width: "100%", overflow: "hidden" }}>
               <div style={{ width: 220, flexShrink: 0, border: `1px solid ${C.line}`, borderRadius: 14, background: C.surface, overflowY: "auto" }}>
-                {verFiles.length === 0 && <div style={{ padding: 12, fontSize: 13, color: C.muted }}>空包</div>}
+                {verFiles.length === 0 && <div style={{ padding: 12, fontSize: 13, color: C.muted }}>{t.emptyPkg}</div>}
                 {verFiles.map((f) => (
                   <div key={f.path} onClick={() => setSelFile(f)} className="flex items-center gap-1.5"
                        style={{ padding: "7px 10px", cursor: "pointer", fontSize: 13, minWidth: 0,
@@ -604,7 +675,7 @@ export default function SkillManager() {
                         <button key={m} onClick={() => setMdMode(m)}
                                 style={{ padding: "3px 12px", fontSize: 12, fontFamily: FZH, border: "none", cursor: "pointer",
                                          background: mdMode === m ? C.signal : "transparent", color: mdMode === m ? "#fff" : C.body }}>
-                          {m === "pretty" ? "美化" : "源码"}
+                          {m === "pretty" ? t.pretty : t.source}
                         </button>
                       ))}
                     </div>
@@ -612,13 +683,13 @@ export default function SkillManager() {
                 </div>
                 <div style={{ flex: 1, minWidth: 0, overflow: "auto", padding: 14 }}>
                   {!selFile ? (
-                    <div style={{ fontSize: 13, color: C.muted }}>选择左侧文件查看</div>
+                    <div style={{ fontSize: 13, color: C.muted }}>{t.pickFileHint}</div>
                   ) : !selFile.is_text ? (
-                    <div style={{ fontSize: 13, color: C.muted }}>二进制文件，不可预览（{(selFile.size / 1024).toFixed(1)} KB）</div>
+                    <div style={{ fontSize: 13, color: C.muted }}>{t.binaryFile((selFile.size / 1024).toFixed(1))}</div>
                   ) : isMd(selFile.path) && mdMode === "pretty" ? (
                     <div className="femd" dangerouslySetInnerHTML={{ __html: mdHtml }} />
                   ) : (
-                    <pre style={{ margin: 0, color: C.body, fontFamily: FMONO, fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{selFile.text || "（空文件）"}</pre>
+                    <pre style={{ margin: 0, color: C.body, fontFamily: FMONO, fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{selFile.text || t.emptyFile}</pre>
                   )}
                 </div>
               </div>
@@ -629,14 +700,14 @@ export default function SkillManager() {
             {/* 审核与文档同屏：当前所看版本 pending 就地通过/驳回 */}
             {selVer?.review_status === "pending" && (
               <>
-                <Button style={btnPrimary} onClick={() => selVer && review(selVer.id, "approve")}><Check className="size-4 mr-1" />通过发布</Button>
-                <Button variant="outline" style={btnGhost} onClick={() => selVer && review(selVer.id, "reject")}><X className="size-4 mr-1" />驳回</Button>
+                <Button style={btnPrimary} onClick={() => selVer && review(selVer.id, "approve")}><Check className="size-4 mr-1" />{t.approvePublish}</Button>
+                <Button variant="outline" style={btnGhost} onClick={() => selVer && review(selVer.id, "reject")}><X className="size-4 mr-1" />{t.reject}</Button>
               </>
             )}
             {/* 下架只对已发布（有 current_version）的 skill 开放——没发布过谈不上下架 */}
             {detail?.skill.current_version_id != null && detail.skill.status !== "deprecated" && (
               <Button style={btnDanger} onClick={() => detail && deprecate(detail.skill.id)}>
-                <Trash2 className="size-4 mr-1" />下架
+                <Trash2 className="size-4 mr-1" />{t.deprecateBtn}
               </Button>
             )}
           </DialogFooter>

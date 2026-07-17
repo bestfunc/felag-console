@@ -1,5 +1,5 @@
 name: 客户端版本管理
-version: 0.1.4
+version: 0.1.5
 description: Félag 数字员工客户端(felag-client)安装包发布/回滚/删除治理，双平台(Windows/macOS)独立当前版
 group: Félag
 name_i18n:

@@ -1,10 +1,82 @@
 import { useState, useCallback, useEffect } from "react";
 import { Button, Input, Label, Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem, Badge, toast,
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@platform/ui";
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, useCurrentLanguage } from "@platform/ui";
 import { Plus, RefreshCw, Check, X, Trash2 } from "lucide-react";
 
 const SLUG = "felag-console-plugin";
+
+// ── i18n(PD_001_30):单文件 tsx 插件自带轻量语言包;useCurrentLanguage() 随平台切换响应式返回 'zh'|'en'。
+//    子组件(StatusBadge/ScopeCascader)各自调 useCurrentLanguage();模块级 callNode 拿不到 hook,传 t。 ──
+const I18N = {
+  zh: {
+    reqFail: "请求失败",
+    approved: "已通过", deprecated: "已停用", pendingReview: "待审核",
+    title: "插件源管理", refresh: "刷新", newSource: "新建源",
+    thPlugin: "插件", thVersion: "版本", thScope: "作用域", thStatus: "状态", thActions: "操作",
+    view: "查看", setName: "设置名称", approve: "审核通过", delete: "删除", update: "更新", deprecateBtn: "停用",
+    noSources: "暂无插件源",
+    noPluginsInBranch: (b: string) => `分支 ${b} 下未发现可用插件`,
+    needGitFirst: "请先填 Git 地址",
+    needGitUrl: "请填 git_url", needPlugin: "请填 plugin", needScope: "请选择作用域",
+    submitted: "已提交待审核", deleted: "已删除",
+    renamedApproved: "已更新展示名，约 30 秒内下发到客户端", renamed: "已更新展示名",
+    syncRequested: "已请求同步，约 30 秒内 felag-server 会重新摄取该源",
+    inputEyebrow: "INPUT · 输入", newSourceDialog: "新建插件源",
+    gitUrl: "Git 地址", discovering: "探测中…", discover: "探测",
+    branch: "分支", selectBranch: "选择分支",
+    pluginPkg: "插件包名",
+    pluginPkgPlaceholder: "插件仓库里的技术包名（可手填，或点上方探测结果）",
+    pluginPkgHint: "须与仓库 plugin.json 的 name 一致，摄取时会校验，不是给人看的名字",
+    displayName: "展示名",
+    displayNamePlaceholder: "给人看的友好名（选填，如“智能质量”）；空则用包名",
+    displayNameHint: "数字员工客户端的连接器卡片会显示这个名字",
+    submitting: "提交中…", submitReview: "提交待审核",
+    detailEyebrow: "DETAIL · 源详情", close: "关闭",
+    renameEyebrow: "RENAME · 设置名称", setDisplayName: "设置展示名",
+    renamePkgLabel: "插件包名 ", renamePkgNote: " · 仅改展示名，其它不变",
+    renamePlaceholder: "给人看的友好名（留空则用包名）",
+    cancel: "取消", saving: "保存中…", save: "保存",
+    colEmpty: "（空）", selAllDepts: "选中=全部部门", selAllPos: "选中=全部岗位",
+    unitDept: "部门", unitPos: "岗位", dotAllDepts: " · 全部部门", dotAllPos: " · 全部岗位",
+    selectedPrefix: (label: string) => `已选：${label}`,
+    cascaderHint: "点部门=选其“全部岗位”，含下级会自动展开右侧供细选",
+  },
+  en: {
+    reqFail: "Request failed",
+    approved: "Approved", deprecated: "Disabled", pendingReview: "Pending",
+    title: "Plugin Sources", refresh: "Refresh", newSource: "New source",
+    thPlugin: "Plugin", thVersion: "Version", thScope: "Scope", thStatus: "Status", thActions: "Actions",
+    view: "View", setName: "Set name", approve: "Approve", delete: "Delete", update: "Update", deprecateBtn: "Disable",
+    noSources: "No plugin sources yet",
+    noPluginsInBranch: (b: string) => `No usable plugins found on branch ${b}`,
+    needGitFirst: "Please enter a Git URL first",
+    needGitUrl: "Please enter git_url", needPlugin: "Please enter plugin", needScope: "Please choose a scope",
+    submitted: "Submitted for review", deleted: "Deleted",
+    renamedApproved: "Display name updated, reaches clients within ~30s", renamed: "Display name updated",
+    syncRequested: "Sync requested; felag-server will re-ingest this source within ~30s",
+    inputEyebrow: "INPUT", newSourceDialog: "New plugin source",
+    gitUrl: "Git URL", discovering: "Probing…", discover: "Probe",
+    branch: "Branch", selectBranch: "Choose branch",
+    pluginPkg: "Plugin package name",
+    pluginPkgPlaceholder: "Technical package name in the repo (type manually, or click a probe result above)",
+    pluginPkgHint: "Must match the name in the repo's plugin.json; verified on ingest, not a human-facing name",
+    displayName: "Display name",
+    displayNamePlaceholder: "Friendly name (optional, e.g. “Smart Quality”); empty uses the package name",
+    displayNameHint: "This name shows on the connector card in the digital-employee client",
+    submitting: "Submitting…", submitReview: "Submit for review",
+    detailEyebrow: "DETAIL", close: "Close",
+    renameEyebrow: "RENAME", setDisplayName: "Set display name",
+    renamePkgLabel: "Plugin package ", renamePkgNote: " · only the display name changes, nothing else",
+    renamePlaceholder: "Friendly name (empty uses the package name)",
+    cancel: "Cancel", saving: "Saving…", save: "Save",
+    colEmpty: "(empty)", selAllDepts: "select = all departments", selAllPos: "select = all positions",
+    unitDept: "dept.", unitPos: "pos.", dotAllDepts: " · all departments", dotAllPos: " · all positions",
+    selectedPrefix: (label: string) => `Selected: ${label}`,
+    cascaderHint: "Click a department to select all its positions; nodes with children expand on the right for finer selection",
+  },
+};
+type Dict = typeof I18N.zh;
 
 // ── Ice Blue Enterprise 品牌值（bestfunc-design skill §1/§2/§5）──
 // 平台 Tailwind 预编译、不认插件新加的具名 token → 品牌值走内联 style（运行时插件里稳定渲染）。
@@ -57,14 +129,14 @@ const dialogStyle: React.CSSProperties = {
   fontFamily: FZH, width: "94vw", maxWidth: 640, maxHeight: "88vh", overflowY: "auto",
 };
 
-async function callNode<T>(node: string, params: object): Promise<T> {
+async function callNode<T>(node: string, params: object, t: Dict): Promise<T> {
   const resp = await fetch(`/api/dag/${SLUG}/${node}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params),
   });
   const env = await resp.json();
   const first = env?.data?.results?.[0];
   if (env?.code !== 0 || first?.error) {
-    const raw = first?.error || env?.message || "请求失败";
+    const raw = first?.error || env?.message || t.reqFail;
     const m = String(raw).match(/(?:ValueError|RuntimeError|NodeError|TypeError):\s*([^\n]+)/);
     throw new Error(m ? m[1].trim() : String(raw));
   }
@@ -79,14 +151,16 @@ type Source = {
 };
 
 function StatusBadge({ status }: { status: string }) {
-  if (status === "approved") return <Badge style={pill(C.ok, C.okTint)}>已通过</Badge>;
-  if (status === "deprecated") return <Badge style={pill(C.ng, C.ngTint)}>已停用</Badge>;
-  return <Badge style={{ color: C.warnText, background: C.warnBg, border: `1px solid ${C.warnBorder}66`, fontFamily: FMONO, fontSize: 12, borderRadius: 999 }}>待审核</Badge>;
+  const t = I18N[useCurrentLanguage()];
+  if (status === "approved") return <Badge style={pill(C.ok, C.okTint)}>{t.approved}</Badge>;
+  if (status === "deprecated") return <Badge style={pill(C.ng, C.ngTint)}>{t.deprecated}</Badge>;
+  return <Badge style={{ color: C.warnText, background: C.warnBg, border: `1px solid ${C.warnBorder}66`, fontFamily: FMONO, fontSize: 12, borderRadius: 999 }}>{t.pendingReview}</Badge>;
 }
 
 // 作用域列式级联(changeOnSelect):点任一节点=直接选中它(总部=全部部门 / 部门=该部门全部岗位 / 岗位=该岗位),
 // 含子级的节点点选后右侧自动展开供细选,无需再点三角。右侧件数徽章提示"还能往下选"(用 mono 文本非符号图标,合白名单)。
 function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: string; onChange: (ref: string) => void }) {
+  const t = I18N[useCurrentLanguage()];
   const [path, setPath] = useState<string[]>([]);
   const refset = new Set(scopes.map((s) => s.scope_ref));
   const byRef: Record<string, Scope> = {};
@@ -101,7 +175,7 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
 
   const selLabel = (ref: string): string => {
     const n = byRef[ref]; if (!n) return ref;
-    if (isDept(ref)) return n.label + (isRoot(n) ? " · 全部部门" : " · 全部岗位");
+    if (isDept(ref)) return n.label + (isRoot(n) ? t.dotAllDepts : t.dotAllPos);
     const par = n.parent_ref ? byRef[n.parent_ref] : undefined;
     return (par ? par.label + " / " : "") + n.label;
   };
@@ -120,7 +194,7 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
           {columns.map((col, ci) => (
             <div key={ci} style={{ flex: "0 0 162px", width: 162, maxHeight: 248, overflowY: "auto",
               borderRight: ci < columns.length - 1 ? `1px solid ${C.surface2}` : "none" }}>
-              {col.length === 0 && <div style={{ padding: 10, fontFamily: FMONO, fontSize: 12, color: C.muted }}>（空）</div>}
+              {col.length === 0 && <div style={{ padding: 10, fontFamily: FMONO, fontSize: 12, color: C.muted }}>{t.colEmpty}</div>}
               {col.map((n) => {
                 const kids = childrenOf(n.scope_ref);
                 const dept = isDept(n.scope_ref);
@@ -137,7 +211,7 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
                       <span style={{ fontWeight: selected ? 700 : 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
                       {dept && (
                         <span style={{ fontFamily: FMONO, fontSize: 12, color: C.muted, letterSpacing: ".02em" }}>
-                          {isRoot(n) ? "选中=全部部门" : "选中=全部岗位"}
+                          {isRoot(n) ? t.selAllDepts : t.selAllPos}
                         </span>
                       )}
                     </span>
@@ -145,7 +219,7 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
                       <span style={{ flexShrink: 0, fontFamily: FMONO, fontSize: 12, letterSpacing: ".02em",
                         color: opened ? C.signal : C.muted, background: opened ? C.blueTint : C.surface2,
                         border: `1px solid ${opened ? C.signal + "55" : C.line}`, borderRadius: 999, padding: "1px 7px" }}>
-                        {kids.length} {isRoot(n) ? "部门" : "岗位"}
+                        {kids.length} {isRoot(n) ? t.unitDept : t.unitPos}
                       </span>
                     )}
                   </div>
@@ -156,13 +230,14 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
         </div>
       </div>
       <div style={{ marginTop: 6, fontFamily: FMONO, fontSize: 12, color: value ? C.signal : C.muted }}>
-        {value ? `已选：${selLabel(value)}` : "点部门=选其“全部岗位”，含下级会自动展开右侧供细选"}
+        {value ? t.selectedPrefix(selLabel(value)) : t.cascaderHint}
       </div>
     </div>
   );
 }
 
 export default function PluginSourceManager() {
+  const t = I18N[useCurrentLanguage()];
   const [sources, setSources] = useState<Source[]>([]);
   const [scopes, setScopes] = useState<Scope[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -180,12 +255,12 @@ export default function PluginSourceManager() {
 
   const refresh = useCallback(async () => {
     try {
-      const ctx = await callNode<{ manageable_scopes: Scope[] }>("actor_context", {});
+      const ctx = await callNode<{ manageable_scopes: Scope[] }>("actor_context", {}, t);
       setScopes(ctx.manageable_scopes);
-      const r = await callNode<{ sources: Source[] }>("plugin_source_list", {});
+      const r = await callNode<{ sources: Source[] }>("plugin_source_list", {}, t);
       setSources(r.sources);
     } catch (e: any) { toast.error(e.message); }
-  }, []);
+  }, [t]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -199,20 +274,20 @@ export default function PluginSourceManager() {
 
   // 枚举某分支下的插件(填探测结果提示;枚举=下载整包,大仓/慢网可能软失败,此时插件名手填即可)
   async function enumerate(git_url: string, branch: string) {
-    const r = await callNode<{ plugins?: { name: string; version: string }[]; plugins_error?: string }>("plugin_discover", { git_url, branch });
+    const r = await callNode<{ plugins?: { name: string; version: string }[]; plugins_error?: string }>("plugin_discover", { git_url, branch }, t);
     const plugins = r.plugins ?? [];
     setDiscovered(plugins);
     if (r.plugins_error) toast.error(r.plugins_error);
-    else if (plugins.length === 0) toast.error(`分支 ${branch} 下未发现可用插件`);
+    else if (plugins.length === 0) toast.error(t.noPluginsInBranch(branch));
   }
 
   // 探测:先列所有分支(git smart-HTTP,不吃 REST 限流)→ 选默认分支 → 枚举该分支插件;分支/插件名仍可手填
   async function doDiscover() {
     const git_url = form.git_url.trim();
-    if (!git_url) { toast.error("请先填 Git 地址"); return; }
+    if (!git_url) { toast.error(t.needGitFirst); return; }
     setDiscovering(true);
     try {
-      const r = await callNode<{ branches: string[]; default_branch: string }>("plugin_discover", { git_url });
+      const r = await callNode<{ branches: string[]; default_branch: string }>("plugin_discover", { git_url }, t);
       setBranches(r.branches);
       const br = r.default_branch || "main";
       setForm((f) => ({ ...f, branch: br }));
@@ -233,29 +308,29 @@ export default function PluginSourceManager() {
     const plugin = form.plugin.trim();
     const display_name = form.display_name.trim();
     const branch = form.branch.trim() || "main";
-    if (!git_url) { toast.error("请填 git_url"); return; }
-    if (!plugin) { toast.error("请填 plugin"); return; }
-    if (!form.scope_ref) { toast.error("请选择作用域"); return; }
+    if (!git_url) { toast.error(t.needGitUrl); return; }
+    if (!plugin) { toast.error(t.needPlugin); return; }
+    if (!form.scope_ref) { toast.error(t.needScope); return; }
     setBusy(true);
     try {
-      await callNode("plugin_source_create", { git_url, plugin, display_name, scope_ref: form.scope_ref, branch });
-      toast.success("已提交待审核"); setCreateOpen(false); refresh();
+      await callNode("plugin_source_create", { git_url, plugin, display_name, scope_ref: form.scope_ref, branch }, t);
+      toast.success(t.submitted); setCreateOpen(false); refresh();
     } catch (e: any) { toast.error(e.message); }
     finally { setBusy(false); }
   }
 
   async function review(source_id: number, action: "approve" | "deprecate") {
     try {
-      await callNode("plugin_source_review", { source_id, action });
-      toast.success(action === "approve" ? "已通过" : "已停用");
+      await callNode("plugin_source_review", { source_id, action }, t);
+      toast.success(action === "approve" ? t.approved : t.deprecated);
       refresh();
     } catch (e: any) { toast.error(e.message); }
   }
 
   async function remove(source_id: number) {
     try {
-      await callNode("plugin_source_delete", { source_id });
-      toast.success("已删除");
+      await callNode("plugin_source_delete", { source_id }, t);
+      toast.success(t.deleted);
       refresh();
     } catch (e: any) { toast.error(e.message); }
   }
@@ -268,8 +343,8 @@ export default function PluginSourceManager() {
     if (!renaming) return;
     setRenameBusy(true);
     try {
-      await callNode("plugin_source_rename", { source_id: renaming.id, display_name: renameVal.trim() });
-      toast.success(renaming.status === "approved" ? "已更新展示名，约 30 秒内下发到客户端" : "已更新展示名");
+      await callNode("plugin_source_rename", { source_id: renaming.id, display_name: renameVal.trim() }, t);
+      toast.success(renaming.status === "approved" ? t.renamedApproved : t.renamed);
       setRenaming(null); refresh();
     } catch (e: any) { toast.error(e.message); }
     finally { setRenameBusy(false); }
@@ -278,8 +353,8 @@ export default function PluginSourceManager() {
   // 请求立即同步:置 sync_requested_at,felag-server 快轮询(约 30s)拾取后重摄该源
   async function sync(source_id: number) {
     try {
-      await callNode("plugin_source_sync", { source_id });
-      toast.success("已请求同步，约 30 秒内 felag-server 会重新摄取该源");
+      await callNode("plugin_source_sync", { source_id }, t);
+      toast.success(t.syncRequested);
       refresh();
     } catch (e: any) { toast.error(e.message); }
   }
@@ -289,11 +364,11 @@ export default function PluginSourceManager() {
       <div className="flex items-end justify-between">
         <div>
           <div style={eyebrow(4)}>PLUGIN SOURCE GOVERNANCE</div>
-          <h1 style={{ fontFamily: FZH, fontWeight: 800, fontSize: 26, color: C.ink, letterSpacing: "-0.02em" }}>插件源管理</h1>
+          <h1 style={{ fontFamily: FZH, fontWeight: 800, fontSize: 26, color: C.ink, letterSpacing: "-0.02em" }}>{t.title}</h1>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" style={btnGhost} onClick={refresh}><RefreshCw className="size-4 mr-1" />刷新</Button>
-          <Button style={btnPrimary} onClick={openCreate}><Plus className="size-4 mr-1" />新建源</Button>
+          <Button variant="outline" style={btnGhost} onClick={refresh}><RefreshCw className="size-4 mr-1" />{t.refresh}</Button>
+          <Button style={btnPrimary} onClick={openCreate}><Plus className="size-4 mr-1" />{t.newSource}</Button>
         </div>
       </div>
 
@@ -301,11 +376,11 @@ export default function PluginSourceManager() {
         <Table>
           <TableHeader>
             <TableRow style={{ background: C.surface2 }}>
-              <TableHead style={thStyle}>插件</TableHead>
-              <TableHead style={thStyle}>版本</TableHead>
-              <TableHead style={thStyle}>作用域</TableHead>
-              <TableHead style={thStyle}>状态</TableHead>
-              <TableHead style={{ ...thStyle, textAlign: "right" }}>操作</TableHead>
+              <TableHead style={thStyle}>{t.thPlugin}</TableHead>
+              <TableHead style={thStyle}>{t.thVersion}</TableHead>
+              <TableHead style={thStyle}>{t.thScope}</TableHead>
+              <TableHead style={thStyle}>{t.thStatus}</TableHead>
+              <TableHead style={{ ...thStyle, textAlign: "right" }}>{t.thActions}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -328,31 +403,31 @@ export default function PluginSourceManager() {
                 <TableCell><StatusBadge status={s.status} /></TableCell>
                 <TableCell>
                   <div className="flex gap-2 justify-end" style={{ flexWrap: "wrap" }}>
-                    <Button variant="outline" size="sm" style={btnGhost} onClick={() => setViewing(s)}>查看</Button>
-                    <Button variant="outline" size="sm" style={btnGhost} onClick={() => openRename(s)}>设置名称</Button>
+                    <Button variant="outline" size="sm" style={btnGhost} onClick={() => setViewing(s)}>{t.view}</Button>
+                    <Button variant="outline" size="sm" style={btnGhost} onClick={() => openRename(s)}>{t.setName}</Button>
                     {s.status === "draft" && (
                       <>
                         <Button size="sm" style={{ ...btnPrimary, boxShadow: "none" }} onClick={() => review(s.id, "approve")}>
-                          <Check className="size-4 mr-1" />审核通过
+                          <Check className="size-4 mr-1" />{t.approve}
                         </Button>
                         <Button variant="outline" size="sm" style={btnDanger} onClick={() => remove(s.id)}>
-                          <Trash2 className="size-4 mr-1" />删除
+                          <Trash2 className="size-4 mr-1" />{t.delete}
                         </Button>
                       </>
                     )}
                     {s.status === "approved" && (
                       <>
                         <Button size="sm" style={{ ...btnPrimary, boxShadow: "none" }} onClick={() => sync(s.id)}>
-                          <RefreshCw className="size-4 mr-1" />更新
+                          <RefreshCw className="size-4 mr-1" />{t.update}
                         </Button>
                         <Button variant="outline" size="sm" style={btnGhost} onClick={() => review(s.id, "deprecate")}>
-                          <X className="size-4 mr-1" />停用
+                          <X className="size-4 mr-1" />{t.deprecateBtn}
                         </Button>
                       </>
                     )}
                     {s.status === "deprecated" && (
                       <Button variant="outline" size="sm" style={btnDanger} onClick={() => remove(s.id)}>
-                        <Trash2 className="size-4 mr-1" />删除
+                        <Trash2 className="size-4 mr-1" />{t.delete}
                       </Button>
                     )}
                   </div>
@@ -362,7 +437,7 @@ export default function PluginSourceManager() {
             {sources.length === 0 && (
               <TableRow>
                 <TableCell colSpan={5}>
-                  <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "32px 0", textAlign: "center" }}>暂无插件源</div>
+                  <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "32px 0", textAlign: "center" }}>{t.noSources}</div>
                 </TableCell>
               </TableRow>
             )}
@@ -373,16 +448,16 @@ export default function PluginSourceManager() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent style={dialogStyle}>
           <DialogHeader>
-            <div style={eyebrow(6)}>INPUT · 输入</div>
-            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>新建插件源</DialogTitle>
+            <div style={eyebrow(6)}>{t.inputEyebrow}</div>
+            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>{t.newSourceDialog}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <Label style={labelStyle}>Git 地址</Label>
+              <Label style={labelStyle}>{t.gitUrl}</Label>
               <div className="flex gap-2">
                 <Input style={{ ...inputStyle, flex: 1 }} value={form.git_url} onChange={(e) => setForm({ ...form, git_url: e.target.value })} placeholder="https://github.com/org/repo.git" />
                 <Button variant="outline" style={{ ...btnGhost, opacity: discovering ? 0.6 : 1 }} disabled={discovering} onClick={doDiscover}>
-                  <RefreshCw className="size-4 mr-1" />{discovering ? "探测中…" : "探测"}
+                  <RefreshCw className="size-4 mr-1" />{discovering ? t.discovering : t.discover}
                 </Button>
               </div>
               {discovered.length > 0 && (
@@ -401,30 +476,30 @@ export default function PluginSourceManager() {
               )}
             </div>
             {branches.length > 0 && (
-              <div><Label style={labelStyle}>分支</Label>
+              <div><Label style={labelStyle}>{t.branch}</Label>
                 <Select value={form.branch} onValueChange={onBranchChange}>
-                  <SelectTrigger style={inputStyle}><SelectValue placeholder="选择分支" /></SelectTrigger>
+                  <SelectTrigger style={inputStyle}><SelectValue placeholder={t.selectBranch} /></SelectTrigger>
                   <SelectContent>{branches.map((b) => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             )}
             <div>
-              <Label style={labelStyle}>插件包名</Label>
-              <Input style={inputStyle} value={form.plugin} onChange={(e) => setForm({ ...form, plugin: e.target.value })} placeholder="插件仓库里的技术包名（可手填，或点上方探测结果）" />
-              <div style={{ marginTop: 4, fontFamily: FMONO, fontSize: 12, color: C.muted }}>须与仓库 plugin.json 的 name 一致，摄取时会校验，不是给人看的名字</div>
+              <Label style={labelStyle}>{t.pluginPkg}</Label>
+              <Input style={inputStyle} value={form.plugin} onChange={(e) => setForm({ ...form, plugin: e.target.value })} placeholder={t.pluginPkgPlaceholder} />
+              <div style={{ marginTop: 4, fontFamily: FMONO, fontSize: 12, color: C.muted }}>{t.pluginPkgHint}</div>
             </div>
             <div>
-              <Label style={labelStyle}>展示名</Label>
-              <Input style={inputStyle} value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} placeholder="给人看的友好名（选填，如“智能质量”）；空则用包名" />
-              <div style={{ marginTop: 4, fontFamily: FMONO, fontSize: 12, color: C.muted }}>数字员工客户端的连接器卡片会显示这个名字</div>
+              <Label style={labelStyle}>{t.displayName}</Label>
+              <Input style={inputStyle} value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} placeholder={t.displayNamePlaceholder} />
+              <div style={{ marginTop: 4, fontFamily: FMONO, fontSize: 12, color: C.muted }}>{t.displayNameHint}</div>
             </div>
-            <div><Label style={labelStyle}>作用域</Label>
+            <div><Label style={labelStyle}>{t.thScope}</Label>
               <ScopeCascader scopes={scopes} value={form.scope_ref} onChange={(v) => setForm({ ...form, scope_ref: v })} />
             </div>
           </div>
           <DialogFooter>
             <Button style={{ ...btnPrimary, opacity: busy ? 0.6 : 1 }} disabled={busy} onClick={doCreate}>
-              <Plus className="size-4 mr-1" />{busy ? "提交中…" : "提交待审核"}
+              <Plus className="size-4 mr-1" />{busy ? t.submitting : t.submitReview}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -433,15 +508,15 @@ export default function PluginSourceManager() {
       <Dialog open={!!viewing} onOpenChange={(o) => { if (!o) setViewing(null); }}>
         <DialogContent style={{ ...dialogStyle, maxWidth: 560 }}>
           <DialogHeader>
-            <div style={eyebrow(6)}>DETAIL · 源详情</div>
+            <div style={eyebrow(6)}>{t.detailEyebrow}</div>
             <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>{viewing?.display_name || viewing?.plugin}</DialogTitle>
           </DialogHeader>
           {viewing && (
             <div className="space-y-3">
               {[
-                { k: "插件包名", v: viewing.plugin, mono: true },
-                { k: "Git 地址", v: viewing.git_url, mono: true, breakAll: true },
-                { k: "分支", v: viewing.branch || "main", mono: true },
+                { k: t.pluginPkg, v: viewing.plugin, mono: true, breakAll: false },
+                { k: t.gitUrl, v: viewing.git_url, mono: true, breakAll: true },
+                { k: t.branch, v: viewing.branch || "main", mono: true, breakAll: false },
               ].map((row) => (
                 <div key={row.k}>
                   <Label style={labelStyle}>{row.k}</Label>
@@ -453,7 +528,7 @@ export default function PluginSourceManager() {
             </div>
           )}
           <DialogFooter>
-            <Button style={btnPrimary} onClick={() => setViewing(null)}>关闭</Button>
+            <Button style={btnPrimary} onClick={() => setViewing(null)}>{t.close}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -461,25 +536,25 @@ export default function PluginSourceManager() {
       <Dialog open={!!renaming} onOpenChange={(o) => { if (!o) setRenaming(null); }}>
         <DialogContent style={{ ...dialogStyle, maxWidth: 480 }}>
           <DialogHeader>
-            <div style={eyebrow(6)}>RENAME · 设置名称</div>
-            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>设置展示名</DialogTitle>
+            <div style={eyebrow(6)}>{t.renameEyebrow}</div>
+            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>{t.setDisplayName}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
             <div style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>
-              插件包名 <span style={{ color: C.ink }}>{renaming?.plugin}</span> · 仅改展示名，其它不变
+              {t.renamePkgLabel}<span style={{ color: C.ink }}>{renaming?.plugin}</span>{t.renamePkgNote}
             </div>
             <div>
-              <Label style={labelStyle}>展示名</Label>
+              <Label style={labelStyle}>{t.displayName}</Label>
               <Input style={inputStyle} value={renameVal} onChange={(e) => setRenameVal(e.target.value)}
-                placeholder="给人看的友好名（留空则用包名）" autoFocus
+                placeholder={t.renamePlaceholder} autoFocus
                 onKeyDown={(e) => { if (e.key === "Enter" && !renameBusy) doRename(); }} />
-              <div style={{ marginTop: 4, fontFamily: FMONO, fontSize: 12, color: C.muted }}>数字员工客户端的连接器卡片会显示这个名字</div>
+              <div style={{ marginTop: 4, fontFamily: FMONO, fontSize: 12, color: C.muted }}>{t.displayNameHint}</div>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" style={btnGhost} onClick={() => setRenaming(null)}>取消</Button>
+            <Button variant="outline" style={btnGhost} onClick={() => setRenaming(null)}>{t.cancel}</Button>
             <Button style={{ ...btnPrimary, opacity: renameBusy ? 0.6 : 1 }} disabled={renameBusy} onClick={doRename}>
-              <Check className="size-4 mr-1" />{renameBusy ? "保存中…" : "保存"}
+              <Check className="size-4 mr-1" />{renameBusy ? t.saving : t.save}
             </Button>
           </DialogFooter>
         </DialogContent>
