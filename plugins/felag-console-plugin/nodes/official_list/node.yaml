@@ -1,0 +1,13 @@
+key: official_list
+name: 官方插件列表
+description: 列系统自带官方插件目录 + 各可管作用域的启用态 + 凭据是否已配
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 官方插件目录 + 启用态
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

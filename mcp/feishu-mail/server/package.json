@@ -1,0 +1,12 @@
+{
+  "name": "feishu-mail-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "精简飞书邮件 MCP —— 只读当前用户飞书邮箱(list_folders/list_messages/get_message) + 飞书 OAuth 授权码流。",
+  "main": "index.mjs",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

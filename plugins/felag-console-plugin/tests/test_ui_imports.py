@@ -29,7 +29,7 @@ def test_ui_named_exports_within_platform_whitelist():
         "Button", "Input", "Label", "Table", "TableHeader", "TableBody", "TableRow",
         "TableHead", "TableCell", "Select", "SelectTrigger", "SelectValue", "SelectContent",
         "SelectItem", "Badge", "toast", "Dialog", "DialogContent", "DialogHeader",
-        "DialogTitle", "DialogFooter",
+        "DialogTitle", "DialogFooter", "useCurrentLanguage",
     }
     lucide = _named_imports(tsx, "lucide-react")
     platform_ui = _named_imports(tsx, "@platform/ui")

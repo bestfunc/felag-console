@@ -1,0 +1,13 @@
+key: official_disable
+name: 停用官方插件
+description: 在某作用域停用官方插件(approved→deprecated,felag-server 卸载)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 停用结果
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

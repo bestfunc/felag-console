@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "plugin_key": {"type": "string"},
+    "creds": {"type": "object"}
+  },
+  "required": ["plugin_key", "creds"]
+}

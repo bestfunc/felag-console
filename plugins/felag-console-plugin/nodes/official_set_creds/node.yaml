@@ -1,0 +1,13 @@
+key: official_set_creds
+name: 配置官方插件应用凭据
+description: 写官方插件的应用凭据到平台库 KV(仅超管;felag-server 摄取时注入包内 .env)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 已写入的凭据键名(不含值)
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

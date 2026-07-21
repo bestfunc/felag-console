@@ -41,6 +41,14 @@ const I18N = {
     unitDept: "部门", unitPos: "岗位", dotAllDepts: " · 全部部门", dotAllPos: " · 全部岗位",
     selectedPrefix: (label: string) => `已选：${label}`,
     cascaderHint: "点部门=选其“全部岗位”，含下级会自动展开右侧供细选",
+    tabGit: "第三方源", tabOfficial: "官方插件", officialEyebrow: "OFFICIAL · 系统自带",
+    noOfficial: "暂无官方插件", credsOk: "凭据已配", credsMissing: "凭据未配", setCreds: "配置凭据",
+    enabledScopesLabel: "已启用作用域", enableHere: "启用到作用域", enableBtn: "启用", disableBtn: "停用",
+    enabledOk: "已启用（约 30 秒内下发到客户端）", disabledOk: "已停用",
+    credDialogTitle: "配置飞书应用凭据", credHint: "凭据仅超管可配，随插件签名下发到客户端，用于用户登录飞书。",
+    credAppId: "App ID", credAppSecret: "App Secret", credsSaved: "凭据已保存",
+    needCredsFirst: "请先配置应用凭据再启用", noEnabledScopes: "尚未在任何作用域启用",
+    pickScopeEnable: "选择作用域后启用",
   },
   en: {
     reqFail: "Request failed",
@@ -74,6 +82,14 @@ const I18N = {
     unitDept: "dept.", unitPos: "pos.", dotAllDepts: " · all departments", dotAllPos: " · all positions",
     selectedPrefix: (label: string) => `Selected: ${label}`,
     cascaderHint: "Click a department to select all its positions; nodes with children expand on the right for finer selection",
+    tabGit: "Third-party", tabOfficial: "Official", officialEyebrow: "OFFICIAL · built-in",
+    noOfficial: "No official plugins", credsOk: "credentials set", credsMissing: "credentials missing", setCreds: "Configure credentials",
+    enabledScopesLabel: "Enabled scopes", enableHere: "Enable for scope", enableBtn: "Enable", disableBtn: "Disable",
+    enabledOk: "Enabled (reaches clients within ~30s)", disabledOk: "Disabled",
+    credDialogTitle: "Configure Feishu app credentials", credHint: "Superadmin only; distributed with the signed plugin for users to log in to Feishu.",
+    credAppId: "App ID", credAppSecret: "App Secret", credsSaved: "Credentials saved",
+    needCredsFirst: "Configure credentials before enabling", noEnabledScopes: "Not enabled in any scope",
+    pickScopeEnable: "Pick a scope then enable",
   },
 };
 type Dict = typeof I18N.zh;
@@ -144,6 +160,10 @@ async function callNode<T>(node: string, params: object, t: Dict): Promise<T> {
 }
 
 type Scope = { scope_ref: string; label: string; parent_ref?: string | null };
+type OfficialPlugin = {
+  key: string; plugin: string; display_name: string; display_name_en: string; description: string;
+  cred_keys: string[]; creds_configured: boolean; enabled_scopes: string[];
+};
 type Source = {
   id: number; git_url: string; plugin: string; display_name?: string | null; scope_ref: string; branch: string; status: string;
   created_by: string; reviewed_by: string | null; created_at?: string; reviewed_at?: string | null;
@@ -237,7 +257,8 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
 }
 
 export default function PluginSourceManager() {
-  const t = I18N[useCurrentLanguage()];
+  const lang = useCurrentLanguage();
+  const t = I18N[lang];
   const [sources, setSources] = useState<Source[]>([]);
   const [scopes, setScopes] = useState<Scope[]>([]);
   const [createOpen, setCreateOpen] = useState(false);
@@ -249,6 +270,13 @@ export default function PluginSourceManager() {
   // 查看详情（git 地址/分支/包名收进弹窗，压窄表格）
   const [viewing, setViewing] = useState<Source | null>(null);
   const [busy, setBusy] = useState(false);
+  // 官方插件 tab
+  const [tab, setTab] = useState<"git" | "official">("git");
+  const [official, setOfficial] = useState<OfficialPlugin[]>([]);
+  const [enScope, setEnScope] = useState<Record<string, string>>({}); // pluginKey → 待启用 scope_ref
+  const [credEditing, setCredEditing] = useState<OfficialPlugin | null>(null);
+  const [credForm, setCredForm] = useState({ lark_app_id: "", lark_app_secret: "" });
+  const [credBusy, setCredBusy] = useState(false);
   const [discovered, setDiscovered] = useState<{ name: string; version: string }[]>([]);
   const [branches, setBranches] = useState<string[]>([]);
   const [discovering, setDiscovering] = useState(false);
@@ -259,6 +287,8 @@ export default function PluginSourceManager() {
       setScopes(ctx.manageable_scopes);
       const r = await callNode<{ sources: Source[] }>("plugin_source_list", {}, t);
       setSources(r.sources);
+      const o = await callNode<{ plugins: OfficialPlugin[] }>("official_list", {}, t);
+      setOfficial(o.plugins);
     } catch (e: any) { toast.error(e.message); }
   }, [t]);
 
@@ -350,6 +380,37 @@ export default function PluginSourceManager() {
     finally { setRenameBusy(false); }
   }
 
+  // 官方插件:在某作用域启用/停用;配置应用凭据(超管)
+  async function enableOfficial(plugin_key: string) {
+    const scope_ref = enScope[plugin_key];
+    if (!scope_ref) { toast.error(t.needScope); return; }
+    try {
+      await callNode("official_enable", { plugin_key, scope_ref }, t);
+      toast.success(t.enabledOk); refresh();
+    } catch (e: any) { toast.error(e.message); }
+  }
+  async function disableOfficial(plugin_key: string, scope_ref: string) {
+    try {
+      await callNode("official_disable", { plugin_key, scope_ref }, t);
+      toast.success(t.disabledOk); refresh();
+    } catch (e: any) { toast.error(e.message); }
+  }
+  function openCreds(p: OfficialPlugin) {
+    setCredEditing(p); setCredForm({ lark_app_id: "", lark_app_secret: "" });
+  }
+  async function saveCreds() {
+    if (!credEditing) return;
+    const creds: Record<string, string> = {};
+    if (credForm.lark_app_id.trim()) creds.lark_app_id = credForm.lark_app_id.trim();
+    if (credForm.lark_app_secret.trim()) creds.lark_app_secret = credForm.lark_app_secret.trim();
+    setCredBusy(true);
+    try {
+      await callNode("official_set_creds", { plugin_key: credEditing.key, creds }, t);
+      toast.success(t.credsSaved); setCredEditing(null); refresh();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setCredBusy(false); }
+  }
+
   // 请求立即同步:置 sync_requested_at,felag-server 快轮询(约 30s)拾取后重摄该源
   async function sync(source_id: number) {
     try {
@@ -368,11 +429,78 @@ export default function PluginSourceManager() {
         </div>
         <div className="flex gap-2">
           <Button variant="outline" style={btnGhost} onClick={refresh}><RefreshCw className="size-4 mr-1" />{t.refresh}</Button>
-          <Button style={btnPrimary} onClick={openCreate}><Plus className="size-4 mr-1" />{t.newSource}</Button>
+          {tab === "git" && <Button style={btnPrimary} onClick={openCreate}><Plus className="size-4 mr-1" />{t.newSource}</Button>}
         </div>
       </div>
 
-      <div style={cardStyle}>
+      {/* Tab 切换:第三方源 / 官方插件 */}
+      <div style={{ display: "flex", gap: 6 }}>
+        {(["git", "official"] as const).map((k) => (
+          <button key={k} onClick={() => setTab(k)}
+            style={{ fontFamily: FZH, fontWeight: 700, fontSize: 14, padding: "7px 16px", borderRadius: 999,
+              cursor: "pointer", border: `1px solid ${tab === k ? C.signal : C.line}`,
+              background: tab === k ? C.blueTint : C.surface, color: tab === k ? C.signal : C.body }}>
+            {k === "git" ? t.tabGit : t.tabOfficial}
+          </button>
+        ))}
+      </div>
+
+      {tab === "official" && (
+        <div className="space-y-4">
+          {official.map((p) => {
+            const dn = lang === "en" && p.display_name_en ? p.display_name_en : p.display_name;
+            return (
+              <div key={p.key} style={{ ...cardStyle, padding: 18 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={eyebrow(4)}>{t.officialEyebrow}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontFamily: FZH, fontWeight: 800, fontSize: 18, color: C.ink }}>{dn}</span>
+                      <Badge style={p.creds_configured ? pill(C.ok, C.okTint) : pill(C.warnText, C.warnBg)}>
+                        {p.creds_configured ? t.credsOk : t.credsMissing}
+                      </Badge>
+                    </div>
+                    <div style={{ fontFamily: FZH, fontSize: 13, color: C.muted, marginTop: 4 }}>{p.description}</div>
+                  </div>
+                  <Button variant="outline" style={btnGhost} onClick={() => openCreds(p)}>{t.setCreds}</Button>
+                </div>
+
+                {/* 已启用作用域 */}
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ ...eyebrow(6) }}>{t.enabledScopesLabel}</div>
+                  {p.enabled_scopes.length === 0
+                    ? <div style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>{t.noEnabledScopes}</div>
+                    : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                        {p.enabled_scopes.map((s) => (
+                          <span key={s} style={{ display: "flex", alignItems: "center", gap: 6, ...pill(C.ok, C.okTint), padding: "4px 10px" }}>
+                            {scopeName(s)}
+                            <X className="size-3" style={{ cursor: "pointer" }} onClick={() => disableOfficial(p.key, s)} />
+                          </span>
+                        ))}
+                      </div>}
+                </div>
+
+                {/* 启用到新作用域 */}
+                <div style={{ marginTop: 14, borderTop: `1px solid ${C.surface2}`, paddingTop: 14 }}>
+                  <div style={{ ...eyebrow(6) }}>{t.enableHere}</div>
+                  <ScopeCascader scopes={scopes} value={enScope[p.key] || ""} onChange={(v) => setEnScope((m) => ({ ...m, [p.key]: v }))} />
+                  <div style={{ marginTop: 10 }}>
+                    <Button style={{ ...btnPrimary, opacity: p.creds_configured ? 1 : 0.5 }} disabled={!p.creds_configured}
+                      onClick={() => enableOfficial(p.key)}>
+                      <Check className="size-4 mr-1" />{p.creds_configured ? t.enableBtn : t.needCredsFirst}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {official.length === 0 && (
+            <div style={{ ...cardStyle, padding: 32, textAlign: "center", fontFamily: FMONO, fontSize: 13, color: C.muted }}>{t.noOfficial}</div>
+          )}
+        </div>
+      )}
+
+      {tab === "git" && <div style={cardStyle}>
         <Table>
           <TableHeader>
             <TableRow style={{ background: C.surface2 }}>
@@ -443,7 +571,7 @@ export default function PluginSourceManager() {
             )}
           </TableBody>
         </Table>
-      </div>
+      </div>}
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent style={dialogStyle}>
@@ -529,6 +657,32 @@ export default function PluginSourceManager() {
           )}
           <DialogFooter>
             <Button style={btnPrimary} onClick={() => setViewing(null)}>{t.close}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!credEditing} onOpenChange={(o) => { if (!o) setCredEditing(null); }}>
+        <DialogContent style={{ ...dialogStyle, maxWidth: 480 }}>
+          <DialogHeader>
+            <div style={eyebrow(6)}>{t.officialEyebrow}</div>
+            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>{t.credDialogTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>{t.credHint}</div>
+            <div>
+              <Label style={labelStyle}>{t.credAppId}</Label>
+              <Input style={inputStyle} value={credForm.lark_app_id} onChange={(e) => setCredForm({ ...credForm, lark_app_id: e.target.value })} placeholder="cli_xxxxxxxx" />
+            </div>
+            <div>
+              <Label style={labelStyle}>{t.credAppSecret}</Label>
+              <Input style={inputStyle} type="password" value={credForm.lark_app_secret} onChange={(e) => setCredForm({ ...credForm, lark_app_secret: e.target.value })} placeholder="••••••••" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" style={btnGhost} onClick={() => setCredEditing(null)}>{t.cancel}</Button>
+            <Button style={{ ...btnPrimary, opacity: credBusy ? 0.6 : 1 }} disabled={credBusy} onClick={saveCreds}>
+              <Check className="size-4 mr-1" />{credBusy ? t.saving : t.save}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

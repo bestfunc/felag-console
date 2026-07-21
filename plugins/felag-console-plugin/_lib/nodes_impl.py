@@ -2,7 +2,7 @@
 (params, conn, provider, actor)，写操作在本函数内落 audit 并 commit
 （store 层不 commit，节点层收口事务）。"""
 import psycopg2
-from _lib import store, discover, db
+from _lib import store, discover, db, official_catalog
 
 class NodeError(Exception):
     pass
@@ -149,6 +149,88 @@ def handle_plugin_source_list(params, conn, provider, actor) -> dict:
     # 不再在列表加载时逐行同步探 GitHub —— 那会让列表随源数线性变慢、且受 121→github 抖动/限流拖垮
     # (原实现单源最坏 12s、串行叠加顶穿节点 30s)。draft/未摄取源 git_version 为 NULL,前端展示 '—/待审核'。
     return {"sources": rows}
+
+def handle_official_list(params, conn, provider, actor) -> dict:
+    """列系统自带官方插件目录 + 每条在 actor 各可管 scope 下的启用态 + 凭据是否已配。
+    catalog 是代码常量、只读;启停走 official_enable/disable。"""
+    scope_refs = list(provider.manageable_scope_refs(actor))
+    out = []
+    for p in official_catalog.OFFICIAL_PLUGINS:
+        enabled = store.official_enabled_scopes(conn, p["git_url"], p["plugin"], p["branch"], scope_refs)
+        cfg = store.get_config(conn, p.get("cred_keys", []))
+        creds_ok = all((cfg.get(k) or "").strip() for k in p.get("cred_keys", []))
+        out.append({
+            "key": p["key"], "plugin": p["plugin"], "display_name": p["display_name"],
+            "display_name_en": p.get("display_name_en", ""), "description": p.get("description", ""),
+            "cred_keys": p.get("cred_keys", []), "creds_configured": creds_ok,
+            "enabled_scopes": sorted(enabled),
+        })
+    return {"plugins": out}
+
+
+def _official_or_raise(plugin_key):
+    p = official_catalog.get_official(plugin_key)
+    if p is None:
+        raise NodeError(f"未知官方插件: {plugin_key}")
+    return p
+
+
+def handle_official_enable(params, conn, provider, actor) -> dict:
+    """启用某官方插件(某 scope):校验凭据已配 + scope 反查 → upsert kind='official' approved 源。
+    felag-server 摄取切 mcp/ 子树 + 注入凭据 .env 下发。幂等。"""
+    p = _official_or_raise(params.get("plugin_key"))
+    scope_ref = (params.get("scope_ref") or "").strip()
+    if not scope_ref:
+        raise NodeError("scope_ref 必填")
+    if not provider.can_manage_scope(actor, scope_ref):
+        raise NodeError("无权在该作用域启用官方插件")
+    # 凭据门禁:cred_keys 必须都在 KV 里且非空,否则 felag-server 会注入空 .env、client 登录失败。
+    cfg = store.get_config(conn, p.get("cred_keys", []))
+    missing = [k for k in p.get("cred_keys", []) if not (cfg.get(k) or "").strip()]
+    if missing:
+        raise NodeError(f"请先配置应用凭据: {', '.join(missing)}")
+    sid = store.enable_official(conn, p["git_url"], p["plugin"], p["branch"], scope_ref, p["display_name"], actor.user_id)
+    store.add_audit(conn, actor.user_id, scope_ref, "official.enable", f"source:{sid}",
+                    {"plugin": p["plugin"]})
+    conn.commit()
+    return {"id": sid, "enabled": True}
+
+
+def handle_official_disable(params, conn, provider, actor) -> dict:
+    """停用某官方插件(某 scope):approved→deprecated,felag-server 卸载。scope 反查。"""
+    p = _official_or_raise(params.get("plugin_key"))
+    scope_ref = (params.get("scope_ref") or "").strip()
+    if not provider.can_manage_scope(actor, scope_ref):
+        raise NodeError("无权在该作用域停用官方插件")
+    ok = store.disable_official(conn, p["git_url"], p["plugin"], p["branch"], scope_ref, actor.user_id)
+    if not ok:
+        conn.rollback()
+        raise NodeError("该作用域未启用或状态已变,请刷新")
+    store.add_audit(conn, actor.user_id, scope_ref, "official.disable", f"official:{p['plugin']}", {})
+    conn.commit()
+    return {"disabled": True}
+
+
+def handle_official_set_creds(params, conn, provider, actor) -> dict:
+    """配置某官方插件的应用凭据(写 plg_felagplugin_config KV,felag-server 摄取时注入包内 .env)。
+    仅超管(不绑具体 scope,凭据是租户级)。凭据键限定在该插件 catalog 声明的 cred_keys,防越权写任意 KV。"""
+    p = _official_or_raise(params.get("plugin_key"))
+    if not getattr(actor, "is_superadmin", False):
+        raise NodeError("仅超管可配置官方插件应用凭据")
+    creds = params.get("creds") or {}
+    allowed = set(p.get("cred_keys", []))
+    written = []
+    for k, v in creds.items():
+        if k not in allowed:
+            raise NodeError(f"非法凭据键: {k}")
+        if (v or "").strip():
+            store.set_config(conn, k, v.strip())
+            written.append(k)
+    store.add_audit(conn, actor.user_id, "*", "official.set_creds", f"official:{p['plugin']}",
+                    {"keys": written})  # 只记键名,不记值
+    conn.commit()
+    return {"written": written}
+
 
 def handle_audit_list(params, conn, provider, actor) -> dict:
     scopes = provider.manageable_scope_refs(actor)

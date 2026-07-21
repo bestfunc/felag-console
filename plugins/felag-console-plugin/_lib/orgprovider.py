@@ -12,6 +12,7 @@ class Actor:
     user_id: str          # 平台 users.id（仅 created_by/审计归属）
     name: str
     dept_ref: "str | None"  # 调用者所在部门 scope_ref（None = 未分配 → 可管空）
+    is_superadmin: bool = False  # 平台超管标记（官方插件应用凭据配置等租户级操作用）
 
 @dataclass
 class ScopeNode:
@@ -88,6 +89,7 @@ class PlatformOrgProvider:
             user_id=str(uid) if uid is not None else "",
             name=user.get("display_name") or user.get("username") or "",
             dept_ref=f"dept:{dept['id']}" if dept else None,
+            is_superadmin=bool(user.get("is_superadmin")),
         )
         # 超管逃生口（2026-07-02 用户拍板，刻意偏离 spec §3 的「无 is_super」）：平台超管
         # 常是不挂部门的系统账号(rt.dept=None)，纯组织规则下可管为空 → 无法管理任何 skill。

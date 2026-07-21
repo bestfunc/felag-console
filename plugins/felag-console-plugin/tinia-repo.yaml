@@ -1,6 +1,6 @@
 name: 插件源管理
-version: 0.1.15
-description: Félag 数字员工 MCP 插件源注册/审核/分发治理
+version: 0.1.16
+description: Félag 数字员工 MCP 插件源注册/审核/分发治理 + 官方插件(系统自带)启停
 group: Félag
 name_i18n:
   en: Plugin Sources
@@ -14,6 +14,7 @@ migrations:
   - migrations/004_sync_flag.up.sql
   - migrations/005_git_version.up.sql
   - migrations/006_display_name.up.sql
+  - migrations/007_kind.up.sql
 required_dbs:
   - alias: platform_pg
     description: 平台 PG（daily_report 库，插件源管理表所在；用超管 dr 凭据 id=121）
@@ -36,6 +37,10 @@ modules:
     - plugin_source_rename
     - plugin_discover
     - audit_list
+    - official_list
+    - official_enable
+    - official_disable
+    - official_set_creds
   ui:
     - name: main
       kind: tsx

@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "plugin_key": {"type": "string"},
+    "scope_ref": {"type": "string"}
+  },
+  "required": ["plugin_key", "scope_ref"]
+}
