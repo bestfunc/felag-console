@@ -1,5 +1,5 @@
 name: Skill 管理
-version: 0.1.4
+version: 0.1.5
 description: Félag 数字员工 skill 注册/审核/发布治理
 group: Félag
 name_i18n:
@@ -9,6 +9,7 @@ sdk:
 table_prefix: plg_felagskill_
 migrations:
   - migrations/001_init.up.sql
+  - migrations/002_uploads.up.sql
 required_dbs:
   - alias: platform_pg
     description: 平台 PG（daily_report 库，skill 管理表所在；本期用超管 dr 凭据 id=121）
@@ -35,6 +36,9 @@ modules:
     - skill_deprecate
     - version_delete
     - audit_list
+    - upload_review_list
+    - upload_files
+    - upload_review
   ui:
     - name: main
       kind: tsx

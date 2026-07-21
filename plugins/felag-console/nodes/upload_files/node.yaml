@@ -1,0 +1,13 @@
+key: upload_files
+name: 查看上传件文件
+description: 列某待审上传件包内文件（文本内联、二进制标记），供审核预览
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: files 列表 + name/version
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

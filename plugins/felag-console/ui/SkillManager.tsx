@@ -38,6 +38,12 @@ const I18N = {
     unitDept: "部门", unitPos: "岗位", dotAllDepts: " · 全部部门", dotAllPos: " · 全部岗位",
     selectedPrefix: (label: string) => `已选：${label}`,
     cascaderHint: "点部门=选其“全部岗位”，含下级会自动展开右侧供细选",
+    uploadsTitle: "待审上传（用户提交）", uploadsEmpty: "暂无待审上传",
+    colOwner: "上传人", reviewUpload: "审核",
+    uploadReviewTitle: "审核上传件", pickScopePublish: "选择发布作用域（部门或岗位）",
+    approvePublishScoped: "通过并发布", rejectUpload: "驳回",
+    rejectReasonPh: "驳回原因（可选）",
+    needScopePublish: "请选择发布作用域", approved: "已发布", rejectedDone: "已驳回",
   },
   en: {
     reqFail: "Request failed",
@@ -68,6 +74,12 @@ const I18N = {
     unitDept: "dept.", unitPos: "pos.", dotAllDepts: " · all departments", dotAllPos: " · all positions",
     selectedPrefix: (label: string) => `Selected: ${label}`,
     cascaderHint: "Click a department to select all its positions; nodes with children expand on the right for finer selection",
+    uploadsTitle: "Pending uploads (user-submitted)", uploadsEmpty: "No pending uploads",
+    colOwner: "Uploader", reviewUpload: "Review",
+    uploadReviewTitle: "Review upload", pickScopePublish: "Choose publish scope (department or position)",
+    approvePublishScoped: "Approve & publish", rejectUpload: "Reject",
+    rejectReasonPh: "Reject reason (optional)",
+    needScopePublish: "Please choose a publish scope", approved: "Published", rejectedDone: "Rejected",
   },
 };
 type Dict = typeof I18N.zh;
@@ -290,6 +302,8 @@ type Skill = { id: number; name: string; scope_ref: string; status: string; curr
 type Version = { id: number; version: string; review_status: string; self_review: boolean; uploaded_by: string;
   size_bytes?: number; sha256?: string; created_at?: string; published_at?: string; reviewed_by?: string };
 type PkgFile = { path: string; size: number; is_text: boolean; text?: string };
+type UploadRow = { id: number; owner_username: string; owner_dept_ref: string | null; name: string;
+  version: string; size_bytes: number; description?: string; created_at?: string };
 
 function StatusBadge({ status }: { status: string }) {
   const t = I18N[useCurrentLanguage()];
@@ -393,6 +407,14 @@ export default function SkillManager() {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
+  // 待审上传（用户从 client 提交的私有 skill）
+  const [uploads, setUploads] = useState<UploadRow[]>([]);
+  const [reviewUp, setReviewUp] = useState<UploadRow | null>(null);
+  const [upFiles, setUpFiles] = useState<PkgFile[] | null>(null);
+  const [upSelFile, setUpSelFile] = useState<PkgFile | null>(null);
+  const [upScope, setUpScope] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
+  const [upBusy, setUpBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -400,6 +422,8 @@ export default function SkillManager() {
       setScopes(ctx.manageable_scopes);
       const r = await callNode<{ skills: Skill[] }>("skill_list", {}, t);
       setSkills(r.skills);
+      const u = await callNode<{ uploads: UploadRow[] }>("upload_review_list", {}, t);
+      setUploads(u.uploads);
     } catch (e: any) { toast.error(e.message); }
   }, [t]);
 
@@ -480,6 +504,40 @@ export default function SkillManager() {
     catch (e: any) { toast.error(e.message); }
   }
 
+  // ── 待审上传审核：打开件（拉包内文件预览）/ 通过发布（选作用域）/ 驳回 ──
+  async function openUpload(u: UploadRow) {
+    setReviewUp(u); setUpFiles(null); setUpSelFile(null); setUpScope(""); setRejectReason("");
+    try {
+      const r = await callNode<{ files: PkgFile[] }>("upload_files", { upload_id: u.id }, t);
+      setUpFiles(r.files);
+      const md = r.files.find((f) => /(^|\/)SKILL\.md$/i.test(f.path));
+      setUpSelFile(md || r.files.find((f) => f.is_text) || r.files[0] || null);
+    } catch (e: any) { toast.error(e.message); }
+  }
+  async function approveUpload() {
+    if (!reviewUp) return;
+    if (!upScope) { toast.error(t.needScopePublish); return; }
+    setUpBusy(true);
+    try {
+      await callNode("upload_review", { upload_id: reviewUp.id, action: "approve", scope_ref: upScope }, t);
+      toast.success(t.approved); setReviewUp(null); refresh();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setUpBusy(false); }
+  }
+  async function rejectUpload() {
+    if (!reviewUp) return;
+    setUpBusy(true);
+    try {
+      await callNode("upload_review", { upload_id: reviewUp.id, action: "reject", reject_reason: rejectReason.trim() }, t);
+      toast.success(t.rejectedDone); setReviewUp(null); refresh();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setUpBusy(false); }
+  }
+  const upMdHtml = useMemo(
+    () => (upSelFile && isMd(upSelFile.path) && upSelFile.is_text ? renderMd(upSelFile.text || "") : ""),
+    [upSelFile],
+  );
+
   const verStatusText = (s: string) => s === "published" ? t.published : s === "rejected" ? t.rejected : t.pending;
 
   return (
@@ -537,6 +595,99 @@ export default function SkillManager() {
           </TableBody>
         </Table>
       </div>
+
+      {/* 待审上传：用户从 client 提交的私有 skill，管理员审核后选作用域发布 */}
+      <div>
+        <div style={eyebrow(4)}>USER UPLOADS</div>
+        <div style={{ ...cardStyle, marginTop: 6 }}>
+          <Table>
+            <TableHeader>
+              <TableRow style={{ background: C.surface2 }}>
+                <TableHead style={thStyle}>{t.thName}</TableHead><TableHead style={thStyle}>{t.fldVersion}</TableHead>
+                <TableHead style={thStyle}>{t.colOwner}</TableHead><TableHead style={thStyle}>{t.timeLabel}</TableHead>
+                <TableHead style={thStyle}></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {uploads.map((u) => (
+                <TableRow key={u.id}>
+                  <TableCell style={{ fontWeight: 500, color: C.ink }}>{u.name}</TableCell>
+                  <TableCell style={{ fontFamily: FMONO, fontSize: 13, color: C.body }}>{u.version}</TableCell>
+                  <TableCell style={{ color: C.body }}>{u.owner_username}</TableCell>
+                  <TableCell style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>{(u.created_at || "").replace("T", " ").slice(0, 16) || "—"}</TableCell>
+                  <TableCell>
+                    <div className="flex justify-end">
+                      <Button size="sm" style={{ ...btnPrimary, boxShadow: "none" }} onClick={() => openUpload(u)}>
+                        <Check className="size-4 mr-1" />{t.reviewUpload}
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {uploads.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={5}>
+                    <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "24px 0", textAlign: "center" }}>{t.uploadsEmpty}</div>
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </div>
+      </div>
+
+      {/* 上传件审核弹窗：预览包内文件 + 选作用域通过发布 / 驳回 */}
+      <Dialog open={!!reviewUp} onOpenChange={(o) => !o && setReviewUp(null)}>
+        <DialogContent style={{ ...dialogStyle, width: "90vw", maxWidth: 880, boxSizing: "border-box", overflowX: "hidden" }}>
+          <style>{MD_CSS}</style>
+          <DialogHeader>
+            <div style={eyebrow(6)}>{t.uploadReviewTitle}</div>
+            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>
+              {reviewUp?.name} <span style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, fontWeight: 400 }}>· {reviewUp?.version} · {reviewUp?.owner_username}</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          {upFiles === null ? (
+            <div style={{ fontFamily: FMONO, fontSize: 13, color: C.muted, padding: "40px 0", textAlign: "center" }}>{t.loading}</div>
+          ) : (
+            <div className="flex gap-3" style={{ height: "40vh", minHeight: 200, minWidth: 0, width: "100%", overflow: "hidden" }}>
+              <div style={{ width: 200, flexShrink: 0, border: `1px solid ${C.line}`, borderRadius: 14, background: C.surface, overflowY: "auto" }}>
+                {upFiles.length === 0 && <div style={{ padding: 12, fontSize: 13, color: C.muted }}>{t.emptyPkg}</div>}
+                {upFiles.map((f) => (
+                  <div key={f.path} onClick={() => setUpSelFile(f)} className="flex items-center gap-1.5"
+                       style={{ padding: "7px 10px", cursor: "pointer", fontSize: 13, minWidth: 0,
+                                background: upSelFile?.path === f.path ? C.blueTint : "transparent",
+                                color: upSelFile?.path === f.path ? C.ink : C.body }}>
+                    <FileText className="size-3.5 shrink-0" style={{ color: upSelFile?.path === f.path ? C.signal : C.muted }} />
+                    <span style={{ fontFamily: FMONO, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.path}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="flex flex-col" style={{ flex: 1, minWidth: 0, border: `1px solid ${C.line}`, borderRadius: 14, background: C.surface2, overflow: "auto", padding: 14 }}>
+                {!upSelFile ? <div style={{ fontSize: 13, color: C.muted }}>{t.pickFileHint}</div>
+                  : !upSelFile.is_text ? <div style={{ fontSize: 13, color: C.muted }}>{t.binaryFile((upSelFile.size / 1024).toFixed(1))}</div>
+                  : isMd(upSelFile.path) ? <div className="femd" dangerouslySetInnerHTML={{ __html: upMdHtml }} />
+                  : <pre style={{ margin: 0, color: C.body, fontFamily: FMONO, fontSize: 13, lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{upSelFile.text || t.emptyFile}</pre>}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <Label style={labelStyle}>{t.pickScopePublish}</Label>
+            <ScopeCascader scopes={scopes} value={upScope} onChange={setUpScope} />
+          </div>
+          <Input style={inputStyle} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder={t.rejectReasonPh} />
+
+          <DialogFooter>
+            <Button style={{ ...btnPrimary, opacity: upBusy ? 0.6 : 1 }} disabled={upBusy} onClick={approveUpload}>
+              <Check className="size-4 mr-1" />{t.approvePublishScoped}
+            </Button>
+            <Button variant="outline" style={{ ...btnGhost, opacity: upBusy ? 0.6 : 1 }} disabled={upBusy} onClick={rejectUpload}>
+              <X className="size-4 mr-1" />{t.rejectUpload}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent style={dialogStyle}>

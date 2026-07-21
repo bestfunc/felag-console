@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object", "title": "审核上传件",
+  "required": ["upload_id", "action"],
+  "properties": {
+    "upload_id": {"type": "integer", "title": "上传件 ID"},
+    "action": {"type": "string", "title": "动作", "enum": ["approve", "reject"]},
+    "scope_ref": {"type": "string", "title": "作用域（approve 必填；dept:<id> 或 pos:<id>）"},
+    "reject_reason": {"type": "string", "title": "驳回原因（reject 可选）"}
+  }
+}

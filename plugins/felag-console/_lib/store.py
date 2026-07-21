@@ -139,6 +139,60 @@ def add_audit(conn, actor, scope_ref, action, target, detail):
             (actor, scope_ref, action, target, json.dumps(detail or {})),
         )
 
+# ---- uploads(client 用户上传的私有 skill 暂存区;felag-server 写、console 审核读)----
+def list_pending_uploads(conn, scope_refs):
+    """列待审上传:owner_dept_ref 落在调用者可管作用域内的。scope_refs 空 → 空列表(fail-closed)。
+    owner_dept_ref 为 NULL(上传者未分配部门)的件不匹配任何 scope → 不出现在队列(见迁移注释,MVP 取舍)。"""
+    if not scope_refs:
+        return []
+    with _cur(conn) as cur:
+        cur.execute(
+            f"SELECT id,owner_username,owner_dept_ref,name,version,size_bytes,sha256,description,created_at "
+            f"FROM {P}uploads WHERE status='pending' AND owner_dept_ref = ANY(%s) ORDER BY id DESC",
+            (list(scope_refs),),
+        )
+        return _jsonable(cur.fetchall())
+
+def get_upload(conn, upload_id):
+    with _cur(conn) as cur:
+        cur.execute(
+            f"SELECT id,owner_username,owner_dept_ref,name,version,size_bytes,sha256,"
+            f"description,status,reviewer,reject_reason,published_skill_id,created_at,reviewed_at "
+            f"FROM {P}uploads WHERE id=%s",
+            (upload_id,),
+        )
+        return cur.fetchone()
+
+def get_upload_content(conn, upload_id):
+    with conn.cursor() as cur:
+        cur.execute(f"SELECT content FROM {P}uploads WHERE id=%s", (upload_id,))
+        row = cur.fetchone()
+    if not row:
+        return None
+    c = row[0]
+    return c.tobytes() if isinstance(c, memoryview) else bytes(c)
+
+def mark_upload_reviewed(conn, upload_id, status, reviewer, reject_reason, published_skill_id) -> bool:
+    """条件 UPDATE 防并发双处理:仅 pending 可流转。返回是否命中。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE {P}uploads SET status=%s, reviewer=%s, reject_reason=%s, "
+            f"published_skill_id=%s, reviewed_at=now() "
+            f"WHERE id=%s AND status='pending' RETURNING id",
+            (status, reviewer, reject_reason, published_skill_id, upload_id),
+        )
+        return cur.fetchone() is not None
+
+def publish_version(conn, version_id, reviewer):
+    """把一条已存在的 version 直接置为 published(供审核上传件时用;区别于 review_version 需 pending 前置)。"""
+    with conn.cursor() as cur:
+        cur.execute(
+            f"UPDATE {P}versions SET review_status='published', reviewed_by=%s, published_at=now() "
+            f"WHERE id=%s",
+            (reviewer, version_id),
+        )
+
+
 def list_audit(conn, scope_refs, skill_id):
     if not scope_refs:
         return []

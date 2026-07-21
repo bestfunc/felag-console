@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object", "title": "查看上传件文件",
+  "required": ["upload_id"],
+  "properties": {
+    "upload_id": {"type": "integer", "title": "上传件 ID"}
+  }
+}

@@ -1,0 +1,12 @@
+key: upload_review_list
+name: 待审上传队列
+description: 列 client 用户上传的私有 skill 待审件（按可管作用域过滤）
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: uploads 列表
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt
