@@ -15,9 +15,16 @@ const AUTH_BASE = process.env.LARK_DOMAIN || "https://open.feishu.cn";
 const ACCOUNTS_BASE = process.env.LARK_ACCOUNTS || "https://accounts.feishu.cn";
 const AUTHORIZE_URL = `${ACCOUNTS_BASE}/open-apis/authen/v1/authorize`;
 const TOKEN_URL = `${AUTH_BASE}/open-apis/authen/v2/oauth/token`;
-// 读用户邮箱所需 scope；空则不带 scope，由飞书按应用已授的用户身份权限默认全给。
-// 若默认不含邮箱权限，再用 FEISHU_MAIL_SCOPE 显式指定（如 mail:user_mailbox:readonly，空格分隔多条）。
-const MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || "";
+// 读用户邮箱所需 scope。实测:飞书空 scope 只给「获取用户身份标识」一项,
+// 不会按应用已授权限默认全给 —— 故读邮箱必须逐个显式请求 mail scope。
+// ⚠️ `mail:user_mailbox:readonly` 是「查询用户企业邮箱(元信息)」,不读邮件正文;
+//    读邮件真正需要下面三个(飞书后台均为「用户身份 + 已开通」):
+//      mail:user_mailbox.message:readonly       查询用户邮件(列表/详情)
+//      mail:user_mailbox.message.body:read      获取邮件正文
+//      mail:user_mailbox.message.subject:read   获取邮件主题
+// 多条空格分隔;可用 FEISHU_MAIL_SCOPE 覆盖。
+const MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE ||
+  "mail:user_mailbox.message:readonly mail:user_mailbox.message.body:read mail:user_mailbox.message.subject:read";
 // 回调地址:飞书按白名单精确匹配、不放宽 loopback 端口,故用**固定**地址(非随机端口),
 // 且必须与飞书开放平台「安全设置 → 重定向 URL」登记的完全一致。可用 env 覆盖以对齐后台登记值。
 const REDIRECT_URI = process.env.FEISHU_REDIRECT_URI || "http://127.0.0.1:53170/callback";
