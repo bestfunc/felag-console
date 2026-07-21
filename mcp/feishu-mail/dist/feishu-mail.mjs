@@ -31076,7 +31076,7 @@ async function login({ timeoutMs = 12e4 } = {}) {
         const err = u.searchParams.get("error");
         const code = u.searchParams.get("code");
         const gotState = u.searchParams.get("state");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Connection": "close" });
         if (err || !code || gotState !== state) {
           res.end(page(false, "\u6388\u6743\u5931\u8D25\uFF0C\u8BF7\u56DE\u5230\u5E94\u7528\u91CD\u8BD5\u3002"));
           cleanup();
@@ -31226,6 +31226,7 @@ async function main() {
   if (mode === "login") {
     await login();
     process.stderr.write("\u98DE\u4E66\u767B\u5F55\u5B8C\u6210\u3002\n");
+    setTimeout(() => process.exit(0), 1500).unref();
     return;
   }
   if (mode === "status") {

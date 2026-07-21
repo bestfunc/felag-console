@@ -73,8 +73,10 @@ async function serve() {
 async function main() {
   if (mode === "login") {
     await feishu.login();
-    // login 成功即退出(信息已在浏览器页展示);失败抛错非零退出。
+    // login 成功即退出(信息已在浏览器页展示;token 已同步落盘);失败抛错非零退出。
     process.stderr.write("飞书登录完成。\n");
+    // 兜底:若仍有 socket/handle 挂住事件循环,1.5s 后强制退出(unref 不阻止提前正常退出)。
+    setTimeout(() => process.exit(0), 1500).unref();
     return;
   }
   if (mode === "status") {

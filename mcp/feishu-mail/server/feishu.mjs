@@ -152,7 +152,9 @@ export async function login({ timeoutMs = 120000 } = {}) {
         const err = u.searchParams.get("error");
         const code = u.searchParams.get("code");
         const gotState = u.searchParams.get("state");
-        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+        // Connection: close —— 关键:否则浏览器 keep-alive 连接挂住 server.close(),
+        // 事件循环不空,login 子进程写完 token 也不退出 → client 按钮永远"登录中"。
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Connection": "close" });
         if (err || !code || gotState !== state) {
           res.end(page(false, "授权失败，请回到应用重试。"));
           cleanup();

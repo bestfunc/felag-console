@@ -1,6 +1,6 @@
 {
   "name": "feishu-mail",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "飞书官方邮件插件 —— 用户登录飞书后，数字员工可读取其飞书邮箱邮件。",
   "mcpServers": {
     "feishu": {
