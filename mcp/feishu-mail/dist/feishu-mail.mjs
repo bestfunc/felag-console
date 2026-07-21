@@ -30997,7 +30997,7 @@ async function writeToken(tok) {
 }
 function openBrowser(url2) {
   if (process.platform === "win32") {
-    spawn("cmd", ["/c", "start", "", url2], { detached: true, stdio: "ignore" }).unref();
+    spawn("rundll32", ["url.dll,FileProtocolHandler", url2], { detached: true, stdio: "ignore" }).unref();
   } else if (process.platform === "darwin") {
     spawn("open", [url2], { detached: true, stdio: "ignore" }).unref();
   } else {

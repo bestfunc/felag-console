@@ -52,9 +52,12 @@ async function writeToken(tok) {
 }
 
 function openBrowser(url) {
-  // Windows: cmd start;其它平台兜底。login 由 felag 亲自 spawn(可 hideConsole)。
+  // Windows: 用 rundll32 FileProtocolHandler,URL 作单一参数直交默认浏览器。
+  // ⚠️ 绝不用 `cmd /c start`:cmd 把 URL 里的 `&` 当命令分隔符,授权链接的
+  //   ?client_id=..&redirect_uri=..&state=.. 会被从第一个 & 截断,飞书只收到
+  //   client_id、丢了 redirect_uri → 20029。rundll32 不过 cmd 二次解析,& 安全。
   if (process.platform === "win32") {
-    spawn("cmd", ["/c", "start", "", url], { detached: true, stdio: "ignore" }).unref();
+    spawn("rundll32", ["url.dll,FileProtocolHandler", url], { detached: true, stdio: "ignore" }).unref();
   } else if (process.platform === "darwin") {
     spawn("open", [url], { detached: true, stdio: "ignore" }).unref();
   } else {
