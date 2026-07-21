@@ -17,6 +17,12 @@ const AUTHORIZE_URL = `${ACCOUNTS_BASE}/open-apis/authen/v1/authorize`;
 const TOKEN_URL = `${AUTH_BASE}/open-apis/authen/v2/oauth/token`;
 // 读用户邮箱所需 scope(P2 按应用获批调整)；空则用应用已授全部权限。
 const MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || "";
+// 回调地址:飞书按白名单精确匹配、不放宽 loopback 端口,故用**固定**地址(非随机端口),
+// 且必须与飞书开放平台「安全设置 → 重定向 URL」登记的完全一致。可用 env 覆盖以对齐后台登记值。
+const REDIRECT_URI = process.env.FEISHU_REDIRECT_URI || "http://127.0.0.1:53170/callback";
+const _redir = new URL(REDIRECT_URI);
+const REDIRECT_HOST = _redir.hostname;                       // 127.0.0.1
+const REDIRECT_PORT = Number(_redir.port) || 80;             // 53170
 
 function appCreds() {
   const id = process.env.LARK_APP_ID || "";
@@ -142,8 +148,7 @@ export async function login({ timeoutMs = 120000 } = {}) {
           reject(new Error("授权失败: " + (err || "code/state 缺失或不匹配")));
           return;
         }
-        const redirectUri = `http://127.0.0.1:${port}/callback`;
-        const tok = await exchangeCode(code, redirectUri);
+        const tok = await exchangeCode(code, REDIRECT_URI);
         await writeToken(tok);
         res.end(page(true, "飞书登录成功，本页可关闭。"));
         cleanup();
@@ -154,15 +159,16 @@ export async function login({ timeoutMs = 120000 } = {}) {
         reject(e);
       }
     });
-    let port;
     const timer = setTimeout(() => { cleanup(); reject(new Error("登录超时")); }, timeoutMs);
     function cleanup() { clearTimeout(timer); try { server.close(); } catch {} }
-    server.listen(0, "127.0.0.1", () => {
-      port = server.address().port;
-      const redirectUri = `http://127.0.0.1:${port}/callback`;
+    server.on("error", (e) => {
+      cleanup();
+      reject(new Error(`本地回调端口 ${REDIRECT_PORT} 启动失败(${e.code})；换 FEISHU_REDIRECT_URI 端口并同步改飞书后台登记`));
+    });
+    server.listen(REDIRECT_PORT, REDIRECT_HOST, () => {
       const p = new URLSearchParams({
         client_id: id,
-        redirect_uri: redirectUri,
+        redirect_uri: REDIRECT_URI,   // 必须与飞书后台「重定向 URL」登记值完全一致
         response_type: "code",
         state,
       });

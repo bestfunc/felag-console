@@ -6,7 +6,11 @@ var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __commonJS = (cb, mod) => function __require() {
-  return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  try {
+    return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
+  } catch (e) {
+    throw mod = 0, e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -7470,7 +7474,7 @@ function $constructor(name, initializer3, params) {
   Object.defineProperty(_, "name", { value: name });
   return _;
 }
-var $brand = Symbol("zod_brand");
+var $brand = /* @__PURE__ */ Symbol("zod_brand");
 var $ZodAsyncError = class extends Error {
   constructor() {
     super(`Encountered Promise during synchronous parse. Use .parseAsync() instead.`);
@@ -17213,8 +17217,8 @@ function yo_default() {
 
 // node_modules/zod/v4/core/registries.js
 var _a2;
-var $output = Symbol("ZodOutput");
-var $input = Symbol("ZodInput");
+var $output = /* @__PURE__ */ Symbol("ZodOutput");
+var $input = /* @__PURE__ */ Symbol("ZodInput");
 var $ZodRegistry = class {
   constructor() {
     this._map = /* @__PURE__ */ new WeakMap();
@@ -18251,7 +18255,7 @@ function _stringbool(Classes, _params) {
     type: "pipe",
     in: stringSchema,
     out: booleanSchema,
-    transform: (input, payload) => {
+    transform: ((input, payload) => {
       let data = input;
       if (params.case !== "sensitive")
         data = data.toLowerCase();
@@ -18270,14 +18274,14 @@ function _stringbool(Classes, _params) {
         });
         return {};
       }
-    },
-    reverseTransform: (input, _payload) => {
+    }),
+    reverseTransform: ((input, _payload) => {
       if (input === true) {
         return truthyArray[0] || "true";
       } else {
         return falsyArray[0] || "false";
       }
-    },
+    }),
     error: params.error
   });
   return codec2;
@@ -25113,7 +25117,6 @@ ZodNaN2.create = (params) => {
     ...processCreateParams(params)
   });
 };
-var BRAND = Symbol("zod_brand");
 var ZodBranded = class extends ZodType2 {
   _parse(input) {
     const { ctx } = this._processInputParams(input);
@@ -25307,10 +25310,10 @@ var ZodMiniType = /* @__PURE__ */ $constructor("ZodMiniType", (inst, def) => {
   inst.with = inst.check;
   inst.clone = (_def, params) => clone(inst, _def, params);
   inst.brand = () => inst;
-  inst.register = (reg, meta3) => {
+  inst.register = ((reg, meta3) => {
     reg.add(inst, meta3);
     return inst;
-  };
+  });
   inst.apply = (fn) => fn(inst);
 });
 var ZodMiniObject = /* @__PURE__ */ $constructor("ZodMiniObject", (inst, def) => {
@@ -26850,11 +26853,13 @@ function assertCompleteRequestPrompt(request) {
   if (request.params.ref.type !== "ref/prompt") {
     throw new TypeError(`Expected CompleteRequestPrompt, but got ${request.params.ref.type}`);
   }
+  void request;
 }
 function assertCompleteRequestResourceTemplate(request) {
   if (request.params.ref.type !== "ref/resource") {
     throw new TypeError(`Expected CompleteRequestResourceTemplate, but got ${request.params.ref.type}`);
   }
+  void request;
 }
 var CompleteResultSchema = ResultSchema.extend({
   completion: looseObject({
@@ -27007,7 +27012,7 @@ function isTerminal(status2) {
 }
 
 // node_modules/zod-to-json-schema/dist/esm/Options.js
-var ignoreOverride = Symbol("Let zodToJsonSchema decide on which parser to use");
+var ignoreOverride = /* @__PURE__ */ Symbol("Let zodToJsonSchema decide on which parser to use");
 var defaultOptions = {
   name: void 0,
   $refStrategy: "root",
@@ -29983,7 +29988,7 @@ var Server = class extends Protocol {
 };
 
 // node_modules/@modelcontextprotocol/sdk/dist/esm/server/completable.js
-var COMPLETABLE_SYMBOL = Symbol.for("mcp.completable");
+var COMPLETABLE_SYMBOL = /* @__PURE__ */ Symbol.for("mcp.completable");
 function isCompletable(schema) {
   return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
 }
@@ -30963,6 +30968,10 @@ var ACCOUNTS_BASE = process.env.LARK_ACCOUNTS || "https://accounts.feishu.cn";
 var AUTHORIZE_URL = `${ACCOUNTS_BASE}/open-apis/authen/v1/authorize`;
 var TOKEN_URL = `${AUTH_BASE}/open-apis/authen/v2/oauth/token`;
 var MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || "";
+var REDIRECT_URI = process.env.FEISHU_REDIRECT_URI || "http://127.0.0.1:53170/callback";
+var _redir = new URL(REDIRECT_URI);
+var REDIRECT_HOST = _redir.hostname;
+var REDIRECT_PORT = Number(_redir.port) || 80;
 function appCreds() {
   const id = process.env.LARK_APP_ID || "";
   const secret = process.env.LARK_APP_SECRET || "";
@@ -31074,8 +31083,7 @@ async function login({ timeoutMs = 12e4 } = {}) {
           reject(new Error("\u6388\u6743\u5931\u8D25: " + (err || "code/state \u7F3A\u5931\u6216\u4E0D\u5339\u914D")));
           return;
         }
-        const redirectUri = `http://127.0.0.1:${port}/callback`;
-        const tok = await exchangeCode(code, redirectUri);
+        const tok = await exchangeCode(code, REDIRECT_URI);
         await writeToken(tok);
         res.end(page(true, "\u98DE\u4E66\u767B\u5F55\u6210\u529F\uFF0C\u672C\u9875\u53EF\u5173\u95ED\u3002"));
         cleanup();
@@ -31089,7 +31097,6 @@ async function login({ timeoutMs = 12e4 } = {}) {
         reject(e);
       }
     });
-    let port;
     const timer = setTimeout(() => {
       cleanup();
       reject(new Error("\u767B\u5F55\u8D85\u65F6"));
@@ -31101,12 +31108,15 @@ async function login({ timeoutMs = 12e4 } = {}) {
       } catch {
       }
     }
-    server.listen(0, "127.0.0.1", () => {
-      port = server.address().port;
-      const redirectUri = `http://127.0.0.1:${port}/callback`;
+    server.on("error", (e) => {
+      cleanup();
+      reject(new Error(`\u672C\u5730\u56DE\u8C03\u7AEF\u53E3 ${REDIRECT_PORT} \u542F\u52A8\u5931\u8D25(${e.code})\uFF1B\u6362 FEISHU_REDIRECT_URI \u7AEF\u53E3\u5E76\u540C\u6B65\u6539\u98DE\u4E66\u540E\u53F0\u767B\u8BB0`));
+    });
+    server.listen(REDIRECT_PORT, REDIRECT_HOST, () => {
       const p = new URLSearchParams({
         client_id: id,
-        redirect_uri: redirectUri,
+        redirect_uri: REDIRECT_URI,
+        // 必须与飞书后台「重定向 URL」登记值完全一致
         response_type: "code",
         state
       });
