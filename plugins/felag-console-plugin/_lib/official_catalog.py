@@ -10,6 +10,7 @@ felag-server 摄取切 mcp/<plugin>/ 子树 + 注入凭据 .env 下发到 client
 #   branch       分支
 #   display_name 展示名(下发到 client 连接器卡)
 #   cred_keys    该插件需要的 plg_felagplugin_config KV 键(启用前必须已配,felag-server 注入包内 .env)
+#   secret_keys  cred_keys 里属机密的键(app_secret 一类):official_list 不回显其值、只回非密钥(app_id)供预填
 OFFICIAL_PLUGINS = [
     {
         "key": "feishu-mail",
@@ -20,6 +21,7 @@ OFFICIAL_PLUGINS = [
         "display_name_en": "Feishu Mail",
         "description": "用户登录飞书后，数字员工可读取其飞书邮箱邮件。",
         "cred_keys": ["lark_app_id", "lark_app_secret"],
+        "secret_keys": ["lark_app_secret"],
     },
 ]
 

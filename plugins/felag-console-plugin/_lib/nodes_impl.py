@@ -159,10 +159,14 @@ def handle_official_list(params, conn, provider, actor) -> dict:
         enabled = store.official_enabled_scopes(conn, p["git_url"], p["plugin"], p["branch"], scope_refs)
         cfg = store.get_config(conn, p.get("cred_keys", []))
         creds_ok = all((cfg.get(k) or "").strip() for k in p.get("cred_keys", []))
+        # 回显已配的非机密凭据值(app_id 一类)供编辑弹窗预填"知道老的";机密键(secret_keys)绝不回显。
+        secret = set(p.get("secret_keys", []))
+        cred_values = {k: (cfg.get(k) or "") for k in p.get("cred_keys", []) if k not in secret}
         out.append({
             "key": p["key"], "plugin": p["plugin"], "display_name": p["display_name"],
             "display_name_en": p.get("display_name_en", ""), "description": p.get("description", ""),
             "cred_keys": p.get("cred_keys", []), "creds_configured": creds_ok,
+            "cred_values": cred_values,
             "enabled_scopes": sorted(enabled),
         })
     return {"plugins": out}

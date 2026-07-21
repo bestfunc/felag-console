@@ -49,6 +49,7 @@ const I18N = {
     credAppId: "App ID", credAppSecret: "App Secret", credsSaved: "凭据已保存",
     needCredsFirst: "请先配置应用凭据再启用", noEnabledScopes: "尚未在任何作用域启用",
     pickScopeEnable: "选择作用域后启用",
+    enabledMark: "已启用", credConfiguredHint: "已配置，留空表示不修改",
   },
   en: {
     reqFail: "Request failed",
@@ -90,6 +91,7 @@ const I18N = {
     credAppId: "App ID", credAppSecret: "App Secret", credsSaved: "Credentials saved",
     needCredsFirst: "Configure credentials before enabling", noEnabledScopes: "Not enabled in any scope",
     pickScopeEnable: "Pick a scope then enable",
+    enabledMark: "Enabled", credConfiguredHint: "Configured; leave blank to keep unchanged",
   },
 };
 type Dict = typeof I18N.zh;
@@ -163,6 +165,7 @@ type Scope = { scope_ref: string; label: string; parent_ref?: string | null };
 type OfficialPlugin = {
   key: string; plugin: string; display_name: string; display_name_en: string; description: string;
   cred_keys: string[]; creds_configured: boolean; enabled_scopes: string[];
+  cred_values?: Record<string, string>; // 非机密凭据回显(app_id 一类)供编辑预填;机密键(secret)后端不回
 };
 type Source = {
   id: number; git_url: string; plugin: string; display_name?: string | null; scope_ref: string; branch: string; status: string;
@@ -179,7 +182,7 @@ function StatusBadge({ status }: { status: string }) {
 
 // 作用域列式级联(changeOnSelect):点任一节点=直接选中它(总部=全部部门 / 部门=该部门全部岗位 / 岗位=该岗位),
 // 含子级的节点点选后右侧自动展开供细选,无需再点三角。右侧件数徽章提示"还能往下选"(用 mono 文本非符号图标,合白名单)。
-function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: string; onChange: (ref: string) => void }) {
+function ScopeCascader({ scopes, value, onChange, enabledSet }: { scopes: Scope[]; value: string; onChange: (ref: string) => void; enabledSet?: Set<string> }) {
   const t = I18N[useCurrentLanguage()];
   const [path, setPath] = useState<string[]>([]);
   const refset = new Set(scopes.map((s) => s.scope_ref));
@@ -220,6 +223,7 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
                 const dept = isDept(n.scope_ref);
                 const selected = value === n.scope_ref;
                 const opened = path[ci] === n.scope_ref;
+                const enabled = !!enabledSet?.has(n.scope_ref);
                 return (
                   <div key={n.scope_ref} onClick={() => pick(ci, n)}
                     style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6,
@@ -235,13 +239,21 @@ function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: st
                         </span>
                       )}
                     </span>
-                    {kids.length > 0 && (
-                      <span style={{ flexShrink: 0, fontFamily: FMONO, fontSize: 12, letterSpacing: ".02em",
-                        color: opened ? C.signal : C.muted, background: opened ? C.blueTint : C.surface2,
-                        border: `1px solid ${opened ? C.signal + "55" : C.line}`, borderRadius: 999, padding: "1px 7px" }}>
-                        {kids.length} {isRoot(n) ? t.unitDept : t.unitPos}
-                      </span>
-                    )}
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      {enabled && (
+                        <span style={{ display: "flex", alignItems: "center", gap: 2, fontFamily: FMONO, fontSize: 11,
+                          color: C.ok, background: C.okTint, border: `1px solid ${C.ok}44`, borderRadius: 999, padding: "1px 6px" }}>
+                          <Check className="size-3" />{t.enabledMark}
+                        </span>
+                      )}
+                      {kids.length > 0 && (
+                        <span style={{ fontFamily: FMONO, fontSize: 12, letterSpacing: ".02em",
+                          color: opened ? C.signal : C.muted, background: opened ? C.blueTint : C.surface2,
+                          border: `1px solid ${opened ? C.signal + "55" : C.line}`, borderRadius: 999, padding: "1px 7px" }}>
+                          {kids.length} {isRoot(n) ? t.unitDept : t.unitPos}
+                        </span>
+                      )}
+                    </span>
                   </div>
                 );
               })}
@@ -396,7 +408,8 @@ export default function PluginSourceManager() {
     } catch (e: any) { toast.error(e.message); }
   }
   function openCreds(p: OfficialPlugin) {
-    setCredEditing(p); setCredForm({ lark_app_id: "", lark_app_secret: "" });
+    // 预填已配的非机密值(app_id)让管理员"知道老的";机密(secret)留空 = 不修改。
+    setCredEditing(p); setCredForm({ lark_app_id: p.cred_values?.lark_app_id || "", lark_app_secret: "" });
   }
   async function saveCreds() {
     if (!credEditing) return;
@@ -449,6 +462,8 @@ export default function PluginSourceManager() {
         <div className="space-y-4">
           {official.map((p) => {
             const dn = lang === "en" && p.display_name_en ? p.display_name_en : p.display_name;
+            const sel = enScope[p.key] || "";                       // 当前在 cascader 选中的 scope
+            const selEnabled = !!sel && p.enabled_scopes.includes(sel); // 选中的 scope 是否已启用 → 按钮切"停用"
             return (
               <div key={p.key} style={{ ...cardStyle, padding: 18 }}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -483,12 +498,20 @@ export default function PluginSourceManager() {
                 {/* 启用到新作用域 */}
                 <div style={{ marginTop: 14, borderTop: `1px solid ${C.surface2}`, paddingTop: 14 }}>
                   <div style={{ ...eyebrow(6) }}>{t.enableHere}</div>
-                  <ScopeCascader scopes={scopes} value={enScope[p.key] || ""} onChange={(v) => setEnScope((m) => ({ ...m, [p.key]: v }))} />
+                  <ScopeCascader scopes={scopes} value={sel} enabledSet={new Set(p.enabled_scopes)}
+                    onChange={(v) => setEnScope((m) => ({ ...m, [p.key]: v }))} />
                   <div style={{ marginTop: 10 }}>
-                    <Button style={{ ...btnPrimary, opacity: p.creds_configured ? 1 : 0.5 }} disabled={!p.creds_configured}
-                      onClick={() => enableOfficial(p.key)}>
-                      <Check className="size-4 mr-1" />{p.creds_configured ? t.enableBtn : t.needCredsFirst}
-                    </Button>
+                    {selEnabled ? (
+                      // 选中的 scope 已启用 → 按钮切为「停用」(启停切换)
+                      <Button variant="outline" style={btnGhost} onClick={() => disableOfficial(p.key, sel)}>
+                        <X className="size-4 mr-1" />{t.disableBtn}
+                      </Button>
+                    ) : (
+                      <Button style={{ ...btnPrimary, opacity: p.creds_configured ? 1 : 0.5 }} disabled={!p.creds_configured}
+                        onClick={() => enableOfficial(p.key)}>
+                        <Check className="size-4 mr-1" />{p.creds_configured ? t.enableBtn : t.needCredsFirst}
+                      </Button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -676,6 +699,9 @@ export default function PluginSourceManager() {
             <div>
               <Label style={labelStyle}>{t.credAppSecret}</Label>
               <Input style={inputStyle} type="password" value={credForm.lark_app_secret} onChange={(e) => setCredForm({ ...credForm, lark_app_secret: e.target.value })} placeholder="••••••••" />
+              {credEditing?.creds_configured && (
+                <div style={{ fontFamily: FMONO, fontSize: 11, color: C.muted, marginTop: 4 }}>{t.credConfiguredHint}</div>
+              )}
             </div>
           </div>
           <DialogFooter>
