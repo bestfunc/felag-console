@@ -1,6 +1,6 @@
 {
   "name": "feishu-mail",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "飞书官方邮件插件 —— 用户登录飞书后，数字员工可读取其飞书邮箱邮件。",
   "mcpServers": {
     "feishu": {
@@ -23,7 +23,7 @@
         "LARK_APP_SECRET": "${LARK_APP_SECRET}",
         "FEISHU_AUTH_DIR": "${FEISHU_AUTH_DIR}"
       },
-      "loggedInProbe": ["status"]
+      "loggedInProbe": ["${CLAUDE_PLUGIN_ROOT}/dist/feishu-mail.mjs", "status"]
     }
   }
 }
