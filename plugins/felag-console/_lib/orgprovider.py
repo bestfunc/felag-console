@@ -63,6 +63,10 @@ class StubOrgProvider:
     def list_manageable_scopes(self, actor: Actor):
         return [_TREE[r] for r in sorted(self.manageable_scope_refs(actor))]
 
+    def can_manage_orphans(self, actor: Actor) -> bool:
+        """stub 里用坐公司根的 u_root 近似超管(平台侧看 is_superadmin)。"""
+        return self._actor_id == "u_root"
+
 class PlatformOrgProvider:
     """读平台真实 org（departments/positions，迁移 000017）。可管范围 = 当前 rt.dept 的
     递归子树；坐公司根部门(is_company)时子树自然=全树，无需特判。**无 is_super 特判、不读
@@ -78,12 +82,14 @@ class PlatformOrgProvider:
         self._conn = conn
         self._refs: set = set()      # 可管 scope_ref 集
         self._nodes: list = []       # list[ScopeNode]（部门 + 岗位）
+        self._is_super = False       # 平台超管（get_actor 时从 identity 落）
 
     def get_actor(self, identity) -> Actor:
         ident = identity or {}
         dept = ident.get("dept")
         user = ident.get("user") or {}
         uid = user.get("id")
+        self._is_super = bool(user.get("is_superadmin"))
         actor = Actor(
             user_id=str(uid) if uid is not None else "",
             name=user.get("display_name") or user.get("username") or "",
@@ -152,3 +158,9 @@ class PlatformOrgProvider:
 
     def list_manageable_scopes(self, actor: Actor):
         return list(self._nodes)
+
+    def can_manage_orphans(self, actor: Actor) -> bool:
+        """能否管「上传者没有部门」的待审件(owner_dept_ref IS NULL)。
+        只给超管:此类件不属于任何部门子树,按纯组织规则谁都管不了 —— 而平台超管本身常是
+        不挂部门的系统账号,它上传的私有 skill 正是最容易掉进这个黑洞的一类。"""
+        return self._is_super

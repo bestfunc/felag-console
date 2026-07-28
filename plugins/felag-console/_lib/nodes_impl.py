@@ -181,15 +181,27 @@ def handle_version_delete(params, conn, provider, actor) -> dict:
 
 # ---- upload_review_list（client 用户上传的私有 skill 待审队列）----
 def handle_upload_review_list(params, conn, provider, actor) -> dict:
-    rows = store.list_pending_uploads(conn, provider.manageable_scope_refs(actor))
+    rows = store.list_pending_uploads(
+        conn, provider.manageable_scope_refs(actor), _can_manage_orphans(provider, actor))
     return {"uploads": rows}
+
+def _can_manage_orphans(provider, actor) -> bool:
+    """上传者无部门(owner_dept_ref IS NULL)的件只有超管能看/能审;provider 未实现该方法 → False。"""
+    fn = getattr(provider, "can_manage_orphans", None)
+    return bool(fn(actor)) if fn else False
+
+def _may_touch_upload(provider, actor, up) -> bool:
+    """能否看/审这条上传件:有部门 → 该部门须可管;无部门 → 须超管。"""
+    if up["owner_dept_ref"]:
+        return provider.can_manage_scope(actor, up["owner_dept_ref"])
+    return _can_manage_orphans(provider, actor)
 
 # ---- upload_files（看某待审上传件包里的文件；反查授权：上传者部门须可管）----
 def handle_upload_files(params, conn, provider, actor) -> dict:
     up = store.get_upload(conn, params.get("upload_id"))
     if not up:
         raise NodeError("上传不存在或无权访问")
-    if up["owner_dept_ref"] and not provider.can_manage_scope(actor, up["owner_dept_ref"]):
+    if not _may_touch_upload(provider, actor, up):
         raise NodeError("上传不存在或无权访问")  # 不暴露存在性
     raw = store.get_upload_content(conn, up["id"])
     if raw is None:
@@ -205,8 +217,8 @@ def handle_upload_review(params, conn, provider, actor) -> dict:
     up = store.get_upload(conn, upload_id)
     if not up or up["status"] != "pending":
         raise NodeError("上传不存在或已处理")
-    # 反查授权：上传者部门须在可管范围内(可见性门；owner_dept_ref 为空的件谁都管不了 → fail-closed)
-    if not up["owner_dept_ref"] or not provider.can_manage_scope(actor, up["owner_dept_ref"]):
+    # 反查授权：上传者部门须在可管范围内(可见性门)；owner_dept_ref 为空的件只有超管能审
+    if not _may_touch_upload(provider, actor, up):
         raise NodeError("上传不存在或无权访问")
 
     if action == "reject":

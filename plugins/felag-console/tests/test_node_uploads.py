@@ -35,6 +35,28 @@ def test_list_hides_other_dept(conn):
     out = _run("u_impl", N.handle_upload_review_list, {}, conn)  # u_impl 管 dept:impl,看不到 dept:ops 的件
     assert out["uploads"] == []
 
+# ── 上传者没有部门(超管等系统账号)的件:此前 owner_dept_ref IS NULL 匹配不到任何 scope,
+# 队列查不出来、也审不了 —— 上传者侧却一直显示"待审核"。现在只对超管开放。 ──
+def test_list_shows_orphan_upload_to_superadmin(conn):
+    _seed_upload(conn, owner="admin", dept=None)
+    out = _run("u_root", N.handle_upload_review_list, {}, conn)
+    assert [u["name"] for u in out["uploads"]] == ["deploy"]
+
+def test_list_hides_orphan_upload_from_dept_admin(conn):
+    _seed_upload(conn, owner="admin", dept=None)
+    out = _run("u_ops", N.handle_upload_review_list, {}, conn)
+    assert out["uploads"] == []
+
+def test_superadmin_can_approve_orphan_upload(conn):
+    up = _seed_upload(conn, owner="admin", dept=None)
+    _run("u_root", N.handle_upload_review, {"upload_id": up, "action": "approve", "scope_ref": "dept:ops"}, conn)
+    assert store.get_active_skill_by_name(conn, "deploy")["scope_ref"] == "dept:ops"
+
+def test_dept_admin_cannot_approve_orphan_upload(conn):
+    up = _seed_upload(conn, owner="admin", dept=None)
+    with pytest.raises(N.NodeError):
+        _run("u_ops", N.handle_upload_review, {"upload_id": up, "action": "approve", "scope_ref": "dept:ops"}, conn)
+
 def test_upload_files_preview(conn):
     up = _seed_upload(conn)
     out = _run("u_ops", N.handle_upload_files, {"upload_id": up}, conn)

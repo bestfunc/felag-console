@@ -140,16 +140,23 @@ def add_audit(conn, actor, scope_ref, action, target, detail):
         )
 
 # ---- uploads(client 用户上传的私有 skill 暂存区;felag-server 写、console 审核读)----
-def list_pending_uploads(conn, scope_refs):
-    """列待审上传:owner_dept_ref 落在调用者可管作用域内的。scope_refs 空 → 空列表(fail-closed)。
-    owner_dept_ref 为 NULL(上传者未分配部门)的件不匹配任何 scope → 不出现在队列(见迁移注释,MVP 取舍)。"""
-    if not scope_refs:
+def list_pending_uploads(conn, scope_refs, include_orphans=False):
+    """列待审上传:owner_dept_ref 落在调用者可管作用域内的。两者皆空 → 空列表(fail-closed)。
+    include_orphans=True(仅超管)时额外带上 owner_dept_ref IS NULL 的件 —— 上传者没有部门
+    (超管等系统账号)的件不属于任何子树,否则永远查不出来也审不了。"""
+    conds, args = [], []
+    if scope_refs:
+        conds.append("owner_dept_ref = ANY(%s)")
+        args.append(list(scope_refs))
+    if include_orphans:
+        conds.append("owner_dept_ref IS NULL")
+    if not conds:
         return []
     with _cur(conn) as cur:
         cur.execute(
             f"SELECT id,owner_username,owner_dept_ref,name,version,size_bytes,sha256,description,created_at "
-            f"FROM {P}uploads WHERE status='pending' AND owner_dept_ref = ANY(%s) ORDER BY id DESC",
-            (list(scope_refs),),
+            f"FROM {P}uploads WHERE status='pending' AND ({' OR '.join(conds)}) ORDER BY id DESC",
+            tuple(args),
         )
         return _jsonable(cur.fetchall())
 
