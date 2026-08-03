@@ -30974,7 +30974,9 @@ var MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || [
   "mail:user_mailbox.message:modify",
   "mail:user_mailbox.mail_contact:read",
   "mail:user_mailbox.rule:read",
-  "mail:user_mailbox:readonly"
+  "mail:user_mailbox:readonly",
+  "mail:user_mailbox.message:send"
+  // 发送/回复/转发(2026-07-28 后台已开通)
 ].join(" ");
 var REDIRECT_URI = process.env.FEISHU_REDIRECT_URI || "http://127.0.0.1:53170/callback";
 var _redir = new URL(REDIRECT_URI);
@@ -31229,6 +31231,84 @@ async function listRules() {
   const token = await getAccessToken();
   return await mailGet(`/rules`, token);
 }
+var _selfAddr;
+async function selfAddress() {
+  if (_selfAddr !== void 0) return _selfAddr;
+  try {
+    const token = await getAccessToken();
+    const d = await mailGet(`/profile`, token);
+    _selfAddr = (d?.primary_email_address || "").toLowerCase();
+  } catch {
+    _selfAddr = "";
+  }
+  return _selfAddr;
+}
+async function sendMessage({ to, cc, bcc, subject, body_plain_text, body_html, dedupe_key }) {
+  const token = await getAccessToken();
+  if (!to?.length) throw new Error("\u7F3A\u6536\u4EF6\u4EBA to");
+  if (!body_plain_text && !body_html) throw new Error("\u7F3A\u6B63\u6587(body_plain_text \u6216 body_html)");
+  const body = { to: addrList(to), subject: subject || "" };
+  if (cc?.length) body.cc = addrList(cc);
+  if (bcc?.length) body.bcc = addrList(bcc);
+  if (body_plain_text) body.body_plain_text = body_plain_text;
+  if (body_html) body.body_html = body_html;
+  if (dedupe_key) body.dedupe_key = dedupe_key;
+  return await mailReq(`/messages/send`, token, { method: "POST", body });
+}
+function addrList(list) {
+  return list.map((x) => typeof x === "string" ? { mail_address: x } : x);
+}
+function quoteBlock(m) {
+  const from = m.head_from ? `${m.head_from.name || ""} <${m.head_from.mail_address}>` : "(\u672A\u77E5)";
+  const when = m.internal_date ? new Date(Number(m.internal_date)).toLocaleString("zh-CN") : "";
+  const to = (m.to || []).map((a) => a.mail_address).join(", ");
+  return `
+
+------------------ \u539F\u59CB\u90AE\u4EF6 ------------------
+\u53D1\u4EF6\u4EBA: ${from}
+\u65F6\u95F4: ${when}
+\u6536\u4EF6\u4EBA: ${to}
+\u4E3B\u9898: ${m.subject || ""}
+
+` + (m.body_plain_text || m.body_preview || "(\u539F\u6587\u6B63\u6587\u4E0D\u53EF\u7528)");
+}
+async function replyMessage({ message_id, body_plain_text, reply_all = false, extra_to = [] }) {
+  if (!body_plain_text) throw new Error("\u7F3A\u56DE\u590D\u6B63\u6587 body_plain_text");
+  const d = await getMessage({ message_id });
+  const m = d?.message || d;
+  if (!m) throw new Error("\u539F\u90AE\u4EF6\u4E0D\u5B58\u5728");
+  const replyTo = m.reply_to || m.head_from?.mail_address;
+  if (!replyTo) throw new Error("\u539F\u90AE\u4EF6\u6CA1\u6709\u53EF\u56DE\u590D\u7684\u53D1\u4EF6\u4EBA\u5730\u5740");
+  const to = [replyTo, ...extra_to];
+  let cc = [];
+  if (reply_all) {
+    const me = await selfAddress();
+    cc = [...m.to || [], ...m.cc || []].map((a) => a.mail_address).filter((a) => a && a.toLowerCase() !== me && a.toLowerCase() !== replyTo.toLowerCase());
+    cc = [...new Set(cc)];
+  }
+  const subject = /^re:/i.test(m.subject || "") ? m.subject : `Re: ${m.subject || ""}`;
+  return await sendMessage({
+    to,
+    cc,
+    subject,
+    body_plain_text: body_plain_text + quoteBlock(m)
+  });
+}
+async function forwardMessage({ message_id, to, cc, body_plain_text = "" }) {
+  if (!to?.length) throw new Error("\u7F3A\u6536\u4EF6\u4EBA to");
+  const d = await getMessage({ message_id });
+  const m = d?.message || d;
+  if (!m) throw new Error("\u539F\u90AE\u4EF6\u4E0D\u5B58\u5728");
+  const subject = /^fwd?:/i.test(m.subject || "") ? m.subject : `Fwd: ${m.subject || ""}`;
+  const note = (m.attachments || []).length ? `
+(\u539F\u90AE\u4EF6\u6709 ${m.attachments.length} \u4E2A\u9644\u4EF6\uFF0C\u672A\u968F\u672C\u6B21\u8F6C\u53D1)` : "";
+  return await sendMessage({
+    to,
+    cc,
+    subject,
+    body_plain_text: (body_plain_text || "") + note + quoteBlock(m)
+  });
+}
 async function status() {
   const tok = await readToken();
   if (!tok || !tok.access_token) return { loggedIn: false };
@@ -31383,6 +31463,51 @@ async function serve() {
       inputSchema: {}
     },
     async () => call(() => listRules())
+  );
+  server.registerTool(
+    "send_message",
+    {
+      title: "\u53D1\u9001\u98DE\u4E66\u90AE\u4EF6",
+      description: "\u4EE5\u5F53\u524D\u767B\u5F55\u7528\u6237\u8EAB\u4EFD\u53D1\u4E00\u5C01\u65B0\u90AE\u4EF6\u3002\u26A0\uFE0F \u4E0D\u53EF\u9006\u3001\u5BF9\u5916\u53EF\u89C1:**\u5FC5\u987B\u5148\u628A\u6536\u4EF6\u4EBA/\u4E3B\u9898/\u6B63\u6587\u5B8C\u6574\u5FF5\u7ED9\u7528\u6237\u3001\u5F97\u5230\u660E\u786E\u540C\u610F\u540E\u518D\u8C03\u7528**\uFF0C\u4E0D\u8981\u81EA\u5DF1\u62DF\u5B8C\u5C31\u53D1\u3002\u540C\u4E00\u5C01\u522B\u91CD\u590D\u8C03\u7528(\u53EF\u4F20 dedupe_key \u515C\u5E95)\u3002",
+      inputSchema: {
+        to: external_exports.array(external_exports.string()).min(1).describe("\u6536\u4EF6\u4EBA\u90AE\u7BB1\u5730\u5740"),
+        subject: external_exports.string().describe("\u4E3B\u9898"),
+        body_plain_text: external_exports.string().optional().describe("\u7EAF\u6587\u672C\u6B63\u6587(\u4F18\u5148\u7528\u8FD9\u4E2A)"),
+        body_html: external_exports.string().optional().describe("html \u6B63\u6587(\u9700\u8981\u6392\u7248\u65F6\u624D\u7528)"),
+        cc: external_exports.array(external_exports.string()).optional(),
+        bcc: external_exports.array(external_exports.string()).optional(),
+        dedupe_key: external_exports.string().optional().describe("\u5E42\u7B49\u952E\uFF0C\u9632\u91CD\u590D\u53D1\u9001")
+      }
+    },
+    async (args) => call(() => sendMessage(args))
+  );
+  server.registerTool(
+    "reply_message",
+    {
+      title: "\u56DE\u590D\u98DE\u4E66\u90AE\u4EF6",
+      description: "\u56DE\u590D\u67D0\u5C01\u90AE\u4EF6:\u81EA\u52A8\u53D6\u539F\u53D1\u4EF6\u4EBA\u4E3A\u6536\u4EF6\u4EBA\u3001\u4E3B\u9898\u8865 Re:\u3001\u6B63\u6587\u540E\u9644\u539F\u6587\u5F15\u7528\u3002reply_all=true \u65F6\u628A\u539F\u6536\u4EF6\u4EBA/\u6284\u9001\u4E00\u5E76\u6284\u9001(\u5DF2\u5254\u9664\u81EA\u5DF1)\u3002\u26A0\uFE0F \u4E0D\u53EF\u9006:**\u5148\u628A\u56DE\u590D\u6B63\u6587\u5FF5\u7ED9\u7528\u6237\u786E\u8BA4\u518D\u8C03\u7528**\u3002\u6CE8\u610F:\u672C\u5DE5\u5177\u4E0D\u643A\u5E26 In-Reply-To \u5934\uFF0C\u56DE\u590D\u9760\u4E3B\u9898\u805A\u5408\u3001\u4E0D\u4FDD\u8BC1\u4E32\u8FDB\u539F\u4F1A\u8BDD\u7EBF\u7A0B\u3002",
+      inputSchema: {
+        message_id: external_exports.string().describe("\u88AB\u56DE\u590D\u7684\u90AE\u4EF6 id"),
+        body_plain_text: external_exports.string().describe("\u4F60\u8981\u56DE\u590D\u7684\u6B63\u6587(\u5F15\u7528\u5757\u4F1A\u81EA\u52A8\u9644\u5728\u540E\u9762)"),
+        reply_all: external_exports.boolean().optional().describe("\u662F\u5426\u56DE\u590D\u5168\u90E8\uFF0C\u9ED8\u8BA4 false"),
+        extra_to: external_exports.array(external_exports.string()).optional().describe("\u989D\u5916\u6536\u4EF6\u4EBA")
+      }
+    },
+    async (args) => call(() => replyMessage(args))
+  );
+  server.registerTool(
+    "forward_message",
+    {
+      title: "\u8F6C\u53D1\u98DE\u4E66\u90AE\u4EF6",
+      description: "\u628A\u67D0\u5C01\u90AE\u4EF6\u8F6C\u53D1\u7ED9\u6307\u5B9A\u6536\u4EF6\u4EBA:\u4E3B\u9898\u8865 Fwd:\u3001\u6B63\u6587\u9644\u539F\u6587\u3002\u26A0\uFE0F \u4E0D\u53EF\u9006:**\u5148\u544A\u8BC9\u7528\u6237\u8981\u628A\u54EA\u5C01\u8F6C\u7ED9\u8C01\u3001\u5F97\u5230\u540C\u610F\u518D\u8C03\u7528**\u3002\u26A0\uFE0F \u4E0D\u643A\u5E26\u539F\u9644\u4EF6(\u98DE\u4E66\u8981\u6C42\u91CD\u65B0\u4E0A\u4F20\u9644\u4EF6\u5185\u5BB9)\uFF1B\u8981\u7ED9\u5BF9\u65B9\u9644\u4EF6\u8BF7\u7528 get_attachment_links \u53D6\u94FE\u63A5\u9644\u5728\u6B63\u6587\u91CC\u3002",
+      inputSchema: {
+        message_id: external_exports.string().describe("\u8981\u8F6C\u53D1\u7684\u90AE\u4EF6 id"),
+        to: external_exports.array(external_exports.string()).min(1).describe("\u6536\u4EF6\u4EBA\u90AE\u7BB1\u5730\u5740"),
+        cc: external_exports.array(external_exports.string()).optional(),
+        body_plain_text: external_exports.string().optional().describe("\u8F6C\u53D1\u65F6\u60F3\u9644\u7684\u8BF4\u660E(\u53EF\u7A7A)")
+      }
+    },
+    async (args) => call(() => forwardMessage(args))
   );
   const transport = new StdioServerTransport();
   await server.connect(transport);

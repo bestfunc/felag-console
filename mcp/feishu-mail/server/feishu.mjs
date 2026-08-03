@@ -24,8 +24,7 @@ const TOKEN_URL = `${AUTH_BASE}/open-apis/authen/v2/oauth/token`;
 //      mail:user_mailbox.message.subject:read   获取邮件主题
 // 多条空格分隔;可用 FEISHU_MAIL_SCOPE 覆盖。
 // 2026-07-28 扩:飞书后台已开通的其余邮箱权限一并请求 —— 修改邮件(标已读/打标签/移文件夹)、
-// 邮箱联系人、收信规则、邮箱元信息。⚠️ 加 scope 后老 token 不含新权限,用户须重新授权一次。
-// 🚫 未申请发信权限(mail:user_mailbox.message:send),故不提供发送/回复/转发。
+// 邮箱联系人、收信规则、邮箱元信息、发信。⚠️ 加 scope 后老 token 不含新权限,用户须重新授权一次。
 const MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || [
   "mail:user_mailbox.message:readonly",
   "mail:user_mailbox.message.body:read",
@@ -34,6 +33,7 @@ const MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || [
   "mail:user_mailbox.mail_contact:read",
   "mail:user_mailbox.rule:read",
   "mail:user_mailbox:readonly",
+  "mail:user_mailbox.message:send",   // 发送/回复/转发(2026-07-28 后台已开通)
 ].join(" ");
 // 回调地址:飞书按白名单精确匹配、不放宽 loopback 端口,故用**固定**地址(非随机端口),
 // 且必须与飞书开放平台「安全设置 → 重定向 URL」登记的完全一致。可用 env 覆盖以对齐后台登记值。
@@ -322,6 +322,93 @@ export async function listContacts({ page_token, page_size = 20 } = {}) {
 export async function listRules() {
   const token = await getAccessToken();
   return await mailGet(`/rules`, token);
+}
+
+// 自己的邮箱主地址(回复全部时用来把自己从抄送里剔掉)。取一次缓存在进程内。
+let _selfAddr;
+async function selfAddress() {
+  if (_selfAddr !== undefined) return _selfAddr;
+  try {
+    const token = await getAccessToken();
+    const d = await mailGet(`/profile`, token);
+    _selfAddr = (d?.primary_email_address || "").toLowerCase();
+  } catch {
+    _selfAddr = ""; // 取不到不影响发信,只是可能抄送到自己
+  }
+  return _selfAddr;
+}
+
+// ── 发信(需 mail:user_mailbox.message:send) ──
+// ⚠️ 用飞书 send 的结构化字段(subject/to/body_*),不走 raw RFC822 —— 因此**不携带
+// In-Reply-To/References 头**,回复在对方客户端里靠主题聚合、不保证串进原邮件线程。
+// 要严格串线程需改用 raw(base64url 的完整 RFC822),届时得自己做 MIME 编码。
+export async function sendMessage({ to, cc, bcc, subject, body_plain_text, body_html, dedupe_key }) {
+  const token = await getAccessToken();
+  if (!to?.length) throw new Error("缺收件人 to");
+  if (!body_plain_text && !body_html) throw new Error("缺正文(body_plain_text 或 body_html)");
+  const body = { to: addrList(to), subject: subject || "" };
+  if (cc?.length) body.cc = addrList(cc);
+  if (bcc?.length) body.bcc = addrList(bcc);
+  if (body_plain_text) body.body_plain_text = body_plain_text;
+  if (body_html) body.body_html = body_html;
+  if (dedupe_key) body.dedupe_key = dedupe_key;
+  return await mailReq(`/messages/send`, token, { method: "POST", body });
+}
+
+// 收件人既接受 "a@b.com" 也接受 {mail_address,name}
+function addrList(list) {
+  return list.map((x) => (typeof x === "string" ? { mail_address: x } : x));
+}
+
+function quoteBlock(m) {
+  const from = m.head_from ? `${m.head_from.name || ""} <${m.head_from.mail_address}>` : "(未知)";
+  const when = m.internal_date ? new Date(Number(m.internal_date)).toLocaleString("zh-CN") : "";
+  const to = (m.to || []).map((a) => a.mail_address).join(", ");
+  return `\n\n------------------ 原始邮件 ------------------\n` +
+    `发件人: ${from}\n时间: ${when}\n收件人: ${to}\n主题: ${m.subject || ""}\n\n` +
+    (m.body_plain_text || m.body_preview || "(原文正文不可用)");
+}
+
+// 回复:读原件 → 收件人取原发件人(有 reply_to 优先) → 主题补 Re: → 正文附引用块。
+// reply_all=true 时把原 to/cc 一并抄送(已剔除自己)。
+export async function replyMessage({ message_id, body_plain_text, reply_all = false, extra_to = [] }) {
+  if (!body_plain_text) throw new Error("缺回复正文 body_plain_text");
+  const d = await getMessage({ message_id });
+  const m = d?.message || d;
+  if (!m) throw new Error("原邮件不存在");
+  const replyTo = m.reply_to || m.head_from?.mail_address;
+  if (!replyTo) throw new Error("原邮件没有可回复的发件人地址");
+  const to = [replyTo, ...extra_to];
+  let cc = [];
+  if (reply_all) {
+    const me = await selfAddress();
+    cc = [...(m.to || []), ...(m.cc || [])]
+      .map((a) => a.mail_address)
+      .filter((a) => a && a.toLowerCase() !== me && a.toLowerCase() !== replyTo.toLowerCase());
+    cc = [...new Set(cc)];
+  }
+  const subject = /^re:/i.test(m.subject || "") ? m.subject : `Re: ${m.subject || ""}`;
+  return await sendMessage({
+    to, cc, subject,
+    body_plain_text: body_plain_text + quoteBlock(m),
+  });
+}
+
+// 转发:读原件 → 主题补 Fwd: → 正文附原文引用块。⚠️ 不带原附件(飞书 send 要求把附件内容
+// base64 重新上传,本工具不做);要转附件请用 get_attachment_links 把链接给收件人。
+export async function forwardMessage({ message_id, to, cc, body_plain_text = "" }) {
+  if (!to?.length) throw new Error("缺收件人 to");
+  const d = await getMessage({ message_id });
+  const m = d?.message || d;
+  if (!m) throw new Error("原邮件不存在");
+  const subject = /^fwd?:/i.test(m.subject || "") ? m.subject : `Fwd: ${m.subject || ""}`;
+  const note = (m.attachments || []).length
+    ? `\n(原邮件有 ${m.attachments.length} 个附件，未随本次转发)`
+    : "";
+  return await sendMessage({
+    to, cc, subject,
+    body_plain_text: (body_plain_text || "") + note + quoteBlock(m),
+  });
 }
 
 export async function status() {

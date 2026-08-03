@@ -186,6 +186,65 @@ async function serve() {
     async () => call(() => feishu.listRules())
   );
 
+  // ── 发信类(不可逆、对外可见)。工具描述里强制"先给用户看草稿再发",
+  //    因为 MCP 工具在客户端侧不弹审批,这层提示是发出去之前唯一的闸。
+  server.registerTool(
+    "send_message",
+    {
+      title: "发送飞书邮件",
+      description:
+        "以当前登录用户身份发一封新邮件。⚠️ 不可逆、对外可见:**必须先把收件人/主题/正文完整念给用户、" +
+        "得到明确同意后再调用**，不要自己拟完就发。同一封别重复调用(可传 dedupe_key 兜底)。",
+      inputSchema: {
+        to: z.array(z.string()).min(1).describe("收件人邮箱地址"),
+        subject: z.string().describe("主题"),
+        body_plain_text: z.string().optional().describe("纯文本正文(优先用这个)"),
+        body_html: z.string().optional().describe("html 正文(需要排版时才用)"),
+        cc: z.array(z.string()).optional(),
+        bcc: z.array(z.string()).optional(),
+        dedupe_key: z.string().optional().describe("幂等键，防重复发送"),
+      },
+    },
+    async (args) => call(() => feishu.sendMessage(args))
+  );
+
+  server.registerTool(
+    "reply_message",
+    {
+      title: "回复飞书邮件",
+      description:
+        "回复某封邮件:自动取原发件人为收件人、主题补 Re:、正文后附原文引用。" +
+        "reply_all=true 时把原收件人/抄送一并抄送(已剔除自己)。" +
+        "⚠️ 不可逆:**先把回复正文念给用户确认再调用**。" +
+        "注意:本工具不携带 In-Reply-To 头，回复靠主题聚合、不保证串进原会话线程。",
+      inputSchema: {
+        message_id: z.string().describe("被回复的邮件 id"),
+        body_plain_text: z.string().describe("你要回复的正文(引用块会自动附在后面)"),
+        reply_all: z.boolean().optional().describe("是否回复全部，默认 false"),
+        extra_to: z.array(z.string()).optional().describe("额外收件人"),
+      },
+    },
+    async (args) => call(() => feishu.replyMessage(args))
+  );
+
+  server.registerTool(
+    "forward_message",
+    {
+      title: "转发飞书邮件",
+      description:
+        "把某封邮件转发给指定收件人:主题补 Fwd:、正文附原文。" +
+        "⚠️ 不可逆:**先告诉用户要把哪封转给谁、得到同意再调用**。" +
+        "⚠️ 不携带原附件(飞书要求重新上传附件内容)；要给对方附件请用 get_attachment_links 取链接附在正文里。",
+      inputSchema: {
+        message_id: z.string().describe("要转发的邮件 id"),
+        to: z.array(z.string()).min(1).describe("收件人邮箱地址"),
+        cc: z.array(z.string()).optional(),
+        body_plain_text: z.string().optional().describe("转发时想附的说明(可空)"),
+      },
+    },
+    async (args) => call(() => feishu.forwardMessage(args))
+  );
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 }

@@ -2,9 +2,16 @@
 
 数字员工用的**飞书邮箱**插件。用户在客户端「连接器」页登录飞书后，数字员工可访问其飞书邮箱。
 
-**工具（v0.2.0，10 个）**：`list_folders` / `list_labels` / `list_messages`（支持 `only_unread`、`label_id`，`page_size` 上限 20）/ `search_messages`（关键词 + from/to/主题/标签/有无附件/未读/时间区间过滤）/ `get_message` / `get_messages`（批量，format=metadata|plain_text_full|full）/ `get_attachment_links`（附件下载直链，**仅可用两次、2 小时有效**）/ `list_contacts` / `list_rules` / `modify_message`（**唯一写操作**：加减标签、移动文件夹；标已读 = 移除 `UNREAD` 标签）。
+**工具（v0.3.0，13 个）**
 
-**不支持**：发送 / 回复 / 转发（未申请 `mail:user_mailbox.message:send`）、删除邮件、改规则/联系人。
+- 读：`list_folders` / `list_labels` / `list_messages`（支持 `only_unread`、`label_id`，`page_size` 上限 20）/ `search_messages`（关键词 + from/to/主题/标签/有无附件/未读/时间区间过滤）/ `get_message` / `get_messages`（批量，format=metadata|plain_text_full|full）/ `get_attachment_links`（附件下载直链，**仅可用两次、2 小时有效**）/ `list_contacts` / `list_rules`
+- 写：`modify_message`（加减标签、移动文件夹；标已读 = 移除 `UNREAD`）/ `send_message` / `reply_message`（自动带原文引用、主题 Re:）/ `forward_message`（主题 Fwd:）
+
+**发信的已知限制**：走飞书 send 的结构化字段而非 raw RFC822，故**不携带 `In-Reply-To` 头**，回复靠主题聚合、不保证串进原会话线程；**不支持带附件发送 / 转发原附件**（飞书要求把附件内容 base64 重新上传）。
+
+**不支持**：删除邮件、撤回、改规则/联系人。
+
+⚠️ MCP 工具在客户端侧**不弹审批**，发信不可逆 —— 闸门只在 SKILL.md 的「发信规矩」（发前必须把草稿念给用户确认）。要硬约束需在 felag-client 审批层对发信类工具单独开口子。
 
 - 类型：标准 Claude Code MCP 插件（区别于 `plugins/` 下的日报平台 Tinia 插件）。
 - 分发：经 felag-server 摄取 `mcp/feishu-mail/` 子树 → 签名 → `/dist` → 数字员工客户端装 `engine-home/plugins/feishu-mail/`。
