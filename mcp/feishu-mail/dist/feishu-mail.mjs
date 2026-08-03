@@ -30967,7 +30967,15 @@ var AUTH_BASE = process.env.LARK_DOMAIN || "https://open.feishu.cn";
 var ACCOUNTS_BASE = process.env.LARK_ACCOUNTS || "https://accounts.feishu.cn";
 var AUTHORIZE_URL = `${ACCOUNTS_BASE}/open-apis/authen/v1/authorize`;
 var TOKEN_URL = `${AUTH_BASE}/open-apis/authen/v2/oauth/token`;
-var MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || "mail:user_mailbox.message:readonly mail:user_mailbox.message.body:read mail:user_mailbox.message.subject:read";
+var MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || [
+  "mail:user_mailbox.message:readonly",
+  "mail:user_mailbox.message.body:read",
+  "mail:user_mailbox.message.subject:read",
+  "mail:user_mailbox.message:modify",
+  "mail:user_mailbox.mail_contact:read",
+  "mail:user_mailbox.rule:read",
+  "mail:user_mailbox:readonly"
+].join(" ");
 var REDIRECT_URI = process.env.FEISHU_REDIRECT_URI || "http://127.0.0.1:53170/callback";
 var _redir = new URL(REDIRECT_URI);
 var REDIRECT_HOST = _redir.hostname;
@@ -31130,34 +31138,96 @@ function page(ok2, msg) {
   return `<!doctype html><meta charset="utf-8"><title>\u98DE\u4E66\u6388\u6743</title><div style="font:15px/1.6 -apple-system,Segoe UI,sans-serif;padding:48px;max-width:480px;margin:0 auto"><div style="border-left:3px solid ${color};padding:1rem 1.4rem;background:#fff"><h1 style="font-size:1.1rem;color:${color};margin:.2rem 0">${ok2 ? "\u2713 \u5B8C\u6210" : "\u2715 \u5931\u8D25"}</h1><p>${msg}</p></div></div>`;
 }
 var MAIL_BASE = `${AUTH_BASE}/open-apis/mail/v1/user_mailboxes/me`;
-async function mailGet(pathAndQuery, token) {
-  const resp = await fetch(`${MAIL_BASE}${pathAndQuery}`, {
-    headers: { Authorization: `Bearer ${token}` }
-  });
+async function mailReq(pathAndQuery, token, { method = "GET", body } = {}) {
+  const init = { method, headers: { Authorization: `Bearer ${token}` } };
+  if (body !== void 0) {
+    init.headers["Content-Type"] = "application/json; charset=utf-8";
+    init.body = JSON.stringify(body);
+  }
+  const resp = await fetch(`${MAIL_BASE}${pathAndQuery}`, init);
   const j = await resp.json();
   if (j.code === 99991668 || j.code === 99991679) {
     throw new AuthError("\u98DE\u4E66 user token \u65E0\u6548\u6216\u672A\u6388\u6743\uFF0C\u9700\u91CD\u65B0\u767B\u5F55");
+  }
+  if (j.code === 99991672 || j.code === 99991644) {
+    throw new AuthError("\u98DE\u4E66\u6388\u6743\u7F3A\u5C11\u8BE5\u80FD\u529B\u6240\u9700\u6743\u9650\uFF0C\u8BF7\u5728\u5BA2\u6237\u7AEF\u8FDE\u63A5\u5668\u9875\u91CD\u65B0\u767B\u5F55\u98DE\u4E66\u4EE5\u8865\u6388\u6743");
   }
   if (!resp.ok || j.code && j.code !== 0) {
     throw new Error(`\u98DE\u4E66\u63A5\u53E3\u9519\u8BEF: ${JSON.stringify(j)}`);
   }
   return j.data;
 }
+var mailGet = (pathAndQuery, token) => mailReq(pathAndQuery, token);
 async function listFolders() {
   const token = await getAccessToken();
   return await mailGet(`/folders`, token);
 }
-async function listMessages({ folder_id, page_token, page_size = 20 }) {
+async function listMessages({ folder_id, label_id, page_token, page_size = 20, only_unread }) {
   const token = await getAccessToken();
   const q = new URLSearchParams();
   if (folder_id) q.set("folder_id", folder_id);
+  if (label_id) q.set("label_id", label_id);
   if (page_token) q.set("page_token", page_token);
-  q.set("page_size", String(page_size));
+  if (only_unread) q.set("only_unread", "true");
+  q.set("page_size", String(Math.min(page_size || 20, 20)));
   return await mailGet(`/messages?${q.toString()}`, token);
 }
 async function getMessage({ message_id }) {
   const token = await getAccessToken();
   return await mailGet(`/messages/${encodeURIComponent(message_id)}`, token);
+}
+async function getMessages({ message_ids, format = "plain_text_full" }) {
+  const token = await getAccessToken();
+  return await mailReq(`/messages/batch_get`, token, {
+    method: "POST",
+    body: { message_ids, format }
+  });
+}
+async function searchMessages({ query, filter, page_token, page_size = 20 }) {
+  const token = await getAccessToken();
+  const q = new URLSearchParams();
+  if (page_token) q.set("page_token", page_token);
+  q.set("page_size", String(Math.min(page_size || 20, 20)));
+  const body = {};
+  if (query) body.query = query;
+  if (filter && Object.keys(filter).length) body.filter = filter;
+  return await mailReq(`/search?${q.toString()}`, token, { method: "POST", body });
+}
+async function attachmentLinks({ message_id, attachment_ids }) {
+  const token = await getAccessToken();
+  const q = new URLSearchParams();
+  for (const id of attachment_ids) q.append("attachment_ids", id);
+  return await mailGet(
+    `/messages/${encodeURIComponent(message_id)}/attachments/download_url?${q.toString()}`,
+    token
+  );
+}
+async function modifyMessage({ message_id, add_label_ids, remove_label_ids, add_folder }) {
+  const token = await getAccessToken();
+  const body = {};
+  if (add_label_ids?.length) body.add_label_ids = add_label_ids;
+  if (remove_label_ids?.length) body.remove_label_ids = remove_label_ids;
+  if (add_folder) body.add_folder = add_folder;
+  if (!Object.keys(body).length) throw new Error("modify \u81F3\u5C11\u8981\u7ED9\u4E00\u9879:add_label_ids/remove_label_ids/add_folder");
+  return await mailReq(`/messages/${encodeURIComponent(message_id)}/modify`, token, {
+    method: "POST",
+    body
+  });
+}
+async function listLabels() {
+  const token = await getAccessToken();
+  return await mailGet(`/labels`, token);
+}
+async function listContacts({ page_token, page_size = 20 } = {}) {
+  const token = await getAccessToken();
+  const q = new URLSearchParams();
+  if (page_token) q.set("page_token", page_token);
+  q.set("page_size", String(Math.min(page_size || 20, 20)));
+  return await mailGet(`/mail_contacts?${q.toString()}`, token);
+}
+async function listRules() {
+  const token = await getAccessToken();
+  return await mailGet(`/rules`, token);
 }
 async function status() {
   const tok = await readToken();
@@ -31199,25 +31269,120 @@ async function serve() {
     "list_messages",
     {
       title: "\u5217\u51FA\u98DE\u4E66\u90AE\u4EF6",
-      description: "\u5217\u51FA\u67D0\u6587\u4EF6\u5939\u4E0B\u7684\u90AE\u4EF6\u6458\u8981(\u4E3B\u9898/\u53D1\u4EF6\u4EBA/\u65F6\u95F4/message_id)\u3002folder_id \u7701\u7565\u5219\u5217\u9ED8\u8BA4\u6587\u4EF6\u5939\u3002",
+      description: "\u5217\u51FA\u90AE\u4EF6\u6458\u8981(\u4E3B\u9898/\u53D1\u4EF6\u4EBA/\u65F6\u95F4/message_id/label_ids)\u3002\u26A0\uFE0F folder_id \u4E0E label_id \u5FC5\u987B\u7ED9\u5176\u4E00(\u90FD\u4E0D\u7ED9\u4F1A\u62A5 must pass either folder_id or label_id)\uFF1Bpage_size \u4E0A\u9650 20\uFF1B\u7FFB\u9875\u628A\u8FD4\u56DE\u7684 page_token \u56DE\u4F20\u3002\u53EA\u8981\u672A\u8BFB\u7528 only_unread=true\uFF0C\u4E0D\u8981\u9010\u5C01\u8BFB label_ids \u81EA\u5DF1\u7B5B\u3002\u6309\u4E3B\u9898/\u53D1\u4EF6\u4EBA/\u5173\u952E\u8BCD\u627E\u90AE\u4EF6\u8BF7\u6539\u7528 search_messages\uFF0C\u522B\u5728\u8FD9\u91CC\u7FFB\u9875\u78B0\u8FD0\u6C14\u3002",
       inputSchema: {
-        folder_id: external_exports.string().optional().describe("\u6587\u4EF6\u5939 id(\u6765\u81EA list_folders)"),
-        page_token: external_exports.string().optional().describe("\u5206\u9875\u6807\u8BB0"),
-        page_size: external_exports.number().int().min(1).max(50).optional().describe("\u6BCF\u9875\u6761\u6570\uFF0C\u9ED8\u8BA4 20")
+        folder_id: external_exports.string().optional().describe("\u6587\u4EF6\u5939 id(\u6765\u81EA list_folders)\uFF1B\u4E0E label_id \u4E8C\u9009\u4E00"),
+        label_id: external_exports.string().optional().describe("\u6807\u7B7E id(\u6765\u81EA list_labels)\uFF1B\u4E0E folder_id \u4E8C\u9009\u4E00"),
+        only_unread: external_exports.boolean().optional().describe("\u53EA\u5217\u672A\u8BFB"),
+        page_token: external_exports.string().optional().describe("\u7FFB\u9875\u6807\u8BB0(\u4E0A\u6B21\u8FD4\u56DE\u7684 page_token)"),
+        page_size: external_exports.number().int().min(1).max(20).optional().describe("\u6BCF\u9875\u6761\u6570\uFF0C\u4E0A\u9650 20\uFF0C\u9ED8\u8BA4 20")
       }
     },
     async (args) => call(() => listMessages(args || {}))
   );
   server.registerTool(
+    "search_messages",
+    {
+      title: "\u641C\u7D22\u98DE\u4E66\u90AE\u4EF6",
+      description: "\u6309\u5173\u952E\u8BCD/\u6761\u4EF6\u641C\u7D22\u90AE\u4EF6\uFF0C\u66FF\u4EE3\u9010\u9875\u7FFB\u627E\u3002query \u662F\u5168\u6587\u5173\u952E\u8BCD\uFF1Bfilter \u53EF\u6309\u53D1\u4EF6\u4EBA\u3001\u6536\u4EF6\u4EBA\u3001\u4E3B\u9898\u3001\u6587\u4EF6\u5939\u3001\u6807\u7B7E\u3001\u662F\u5426\u5E26\u9644\u4EF6\u3001\u662F\u5426\u672A\u8BFB\u3001\u65F6\u95F4\u533A\u95F4\u7B5B\u3002page_size \u4E0A\u9650 20\uFF0C\u7FFB\u9875\u7528 page_token\u3002",
+      inputSchema: {
+        query: external_exports.string().optional().describe("\u5168\u6587\u5173\u952E\u8BCD\uFF0C\u5982 \u201C\u62A5\u4EF7 IBC\u201D"),
+        filter: external_exports.object({
+          from: external_exports.array(external_exports.string()).optional().describe("\u53D1\u4EF6\u4EBA\u90AE\u7BB1"),
+          to: external_exports.array(external_exports.string()).optional().describe("\u6536\u4EF6\u4EBA\u90AE\u7BB1"),
+          cc: external_exports.array(external_exports.string()).optional(),
+          bcc: external_exports.array(external_exports.string()).optional(),
+          subject: external_exports.string().optional().describe("\u4E3B\u9898\u5305\u542B"),
+          folder: external_exports.array(external_exports.string()).optional().describe("\u9650\u5B9A\u6587\u4EF6\u5939 id"),
+          label: external_exports.array(external_exports.string()).optional().describe("\u9650\u5B9A\u6807\u7B7E id"),
+          has_attachment: external_exports.boolean().optional(),
+          is_unread: external_exports.boolean().optional(),
+          create_time: external_exports.object({ start_time: external_exports.string().optional(), end_time: external_exports.string().optional() }).optional().describe("\u65F6\u95F4\u533A\u95F4(\u6BEB\u79D2\u65F6\u95F4\u6233\u5B57\u7B26\u4E32)")
+        }).optional(),
+        page_token: external_exports.string().optional(),
+        page_size: external_exports.number().int().min(1).max(20).optional().describe("\u4E0A\u9650 20")
+      }
+    },
+    async (args) => call(() => searchMessages(args || {}))
+  );
+  server.registerTool(
     "get_message",
     {
       title: "\u8BFB\u53D6\u98DE\u4E66\u90AE\u4EF6\u5168\u6587",
-      description: "\u6309 message_id \u8BFB\u53D6\u5355\u5C01\u90AE\u4EF6\u5B8C\u6574\u5185\u5BB9(\u6B63\u6587/\u6536\u53D1\u4EF6\u4EBA/\u9644\u4EF6\u5217\u8868)\u3002",
+      description: "\u6309 message_id \u8BFB\u53D6\u5355\u5C01\u90AE\u4EF6\u5B8C\u6574\u5185\u5BB9(\u6B63\u6587/\u6536\u53D1\u4EF6\u4EBA/\u9644\u4EF6\u5217\u8868)\u3002\u8981\u8BFB\u591A\u5C01\u8BF7\u7528 get_messages \u6279\u91CF\u53D6\u3002",
       inputSchema: {
-        message_id: external_exports.string().describe("\u90AE\u4EF6 id(\u6765\u81EA list_messages)")
+        message_id: external_exports.string().describe("\u90AE\u4EF6 id(\u6765\u81EA list_messages / search_messages)")
       }
     },
     async (args) => call(() => getMessage(args))
+  );
+  server.registerTool(
+    "get_messages",
+    {
+      title: "\u6279\u91CF\u8BFB\u53D6\u98DE\u4E66\u90AE\u4EF6",
+      description: "\u4E00\u6B21\u8BFB\u591A\u5C01\u90AE\u4EF6\u8BE6\u60C5\uFF0C\u7701\u6389\u9010\u5C01\u5F80\u8FD4\u3002format: plain_text_full(\u9ED8\u8BA4\uFF0C\u7EAF\u6587\u672C\u6B63\u6587) / full(\u542B html) / metadata(\u53EA\u8981\u5934\u90E8\uFF0C\u6700\u7701 token)\u3002\u603B\u7ED3\u4E00\u6279\u90AE\u4EF6\u65F6\u4F18\u5148\u7528\u5B83 + metadata \u5148\u626B\u518D\u5B9A\u70B9\u7EC6\u8BFB\u3002",
+      inputSchema: {
+        message_ids: external_exports.array(external_exports.string()).min(1).describe("\u90AE\u4EF6 id \u5217\u8868"),
+        format: external_exports.enum(["plain_text_full", "full", "metadata"]).optional()
+      }
+    },
+    async (args) => call(() => getMessages(args))
+  );
+  server.registerTool(
+    "get_attachment_links",
+    {
+      title: "\u53D6\u98DE\u4E66\u90AE\u4EF6\u9644\u4EF6\u4E0B\u8F7D\u94FE\u63A5",
+      description: "\u6309 attachment_id \u6362\u53D6\u9644\u4EF6\u4E0B\u8F7D\u76F4\u94FE(\u9644\u4EF6 id \u6765\u81EA get_message \u7684\u9644\u4EF6\u5217\u8868)\u3002\u26A0\uFE0F \u98DE\u4E66\u9650\u5236:\u6BCF\u6761\u94FE\u63A5\u53EA\u80FD\u7528\u4E24\u6B21\u3001\u6709\u6548\u671F 2 \u5C0F\u65F6\u3002\u5DE5\u5177\u672C\u8EAB\u4E0D\u4E0B\u8F7D\u6587\u4EF6\uFF0C\u62FF\u5230\u94FE\u63A5\u540E\u7528\u80FD\u4E0B\u8F7D\u7684\u5DE5\u5177\u6216\u4EA4\u7ED9\u7528\u6237\u3002",
+      inputSchema: {
+        message_id: external_exports.string().describe("\u90AE\u4EF6 id"),
+        attachment_ids: external_exports.array(external_exports.string()).min(1).describe("\u9644\u4EF6 id \u5217\u8868(\u6765\u81EA get_message)")
+      }
+    },
+    async (args) => call(() => attachmentLinks(args))
+  );
+  server.registerTool(
+    "list_labels",
+    {
+      title: "\u5217\u51FA\u98DE\u4E66\u90AE\u7BB1\u6807\u7B7E",
+      description: "\u5217\u51FA\u90AE\u4EF6\u6807\u7B7E(id/\u540D\u79F0/\u989C\u8272/\u672A\u8BFB\u6570)\u3002label_id \u53EF\u5582\u7ED9 list_messages \u6216 modify_message\u3002",
+      inputSchema: {}
+    },
+    async () => call(() => listLabels())
+  );
+  server.registerTool(
+    "modify_message",
+    {
+      title: "\u4FEE\u6539\u98DE\u4E66\u90AE\u4EF6\u6807\u7B7E/\u5F52\u6863",
+      description: '\u672C\u63D2\u4EF6\u552F\u4E00\u7684\u5199\u64CD\u4F5C:\u7ED9\u90AE\u4EF6\u52A0/\u51CF\u6807\u7B7E\u3001\u79FB\u52A8\u5230\u6587\u4EF6\u5939\u3002\u6807\u8BB0\u5DF2\u8BFB = remove_label_ids:["UNREAD"]\uFF0C\u6807\u4E3A\u672A\u8BFB = add_label_ids:["UNREAD"]\u3002\u4E0D\u80FD\u5220\u9664\u90AE\u4EF6\u3001\u4E0D\u80FD\u53D1\u4FE1\u3002\u6267\u884C\u524D\u5148\u5411\u7528\u6237\u8BF4\u660E\u8981\u6539\u54EA\u5C01\u3002',
+      inputSchema: {
+        message_id: external_exports.string().describe("\u90AE\u4EF6 id"),
+        add_label_ids: external_exports.array(external_exports.string()).optional().describe("\u8981\u52A0\u7684\u6807\u7B7E id"),
+        remove_label_ids: external_exports.array(external_exports.string()).optional().describe("\u8981\u79FB\u9664\u7684\u6807\u7B7E id"),
+        add_folder: external_exports.string().optional().describe("\u79FB\u52A8\u5230\u7684\u6587\u4EF6\u5939 id")
+      }
+    },
+    async (args) => call(() => modifyMessage(args))
+  );
+  server.registerTool(
+    "list_contacts",
+    {
+      title: "\u5217\u51FA\u98DE\u4E66\u90AE\u7BB1\u8054\u7CFB\u4EBA",
+      description: "\u5217\u51FA\u90AE\u7BB1\u8054\u7CFB\u4EBA(\u59D3\u540D/\u90AE\u7BB1)\u3002page_size \u4E0A\u9650 20\uFF0C\u7FFB\u9875\u7528 page_token\u3002",
+      inputSchema: {
+        page_token: external_exports.string().optional(),
+        page_size: external_exports.number().int().min(1).max(20).optional()
+      }
+    },
+    async (args) => call(() => listContacts(args || {}))
+  );
+  server.registerTool(
+    "list_rules",
+    {
+      title: "\u5217\u51FA\u98DE\u4E66\u90AE\u7BB1\u6536\u4FE1\u89C4\u5219",
+      description: "\u5217\u51FA\u6536\u4FE1\u89C4\u5219(\u81EA\u52A8\u5F52\u6863/\u6253\u6807\u7B7E\u7B49)\u3002\u53EA\u8BFB\uFF0C\u4E0D\u6539\u89C4\u5219\u3002",
+      inputSchema: {}
+    },
+    async () => call(() => listRules())
   );
   const transport = new StdioServerTransport();
   await server.connect(transport);

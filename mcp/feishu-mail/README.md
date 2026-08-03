@@ -1,6 +1,10 @@
 # feishu-mail —— 飞书官方邮件插件（Claude Code MCP 插件）
 
-数字员工用的**只读飞书邮箱**插件。用户在客户端"连接器"页登录飞书后，数字员工可读取其飞书邮箱邮件（列文件夹 / 列邮件 / 读单封）。
+数字员工用的**飞书邮箱**插件。用户在客户端「连接器」页登录飞书后，数字员工可访问其飞书邮箱。
+
+**工具（v0.2.0，10 个）**：`list_folders` / `list_labels` / `list_messages`（支持 `only_unread`、`label_id`，`page_size` 上限 20）/ `search_messages`（关键词 + from/to/主题/标签/有无附件/未读/时间区间过滤）/ `get_message` / `get_messages`（批量，format=metadata|plain_text_full|full）/ `get_attachment_links`（附件下载直链，**仅可用两次、2 小时有效**）/ `list_contacts` / `list_rules` / `modify_message`（**唯一写操作**：加减标签、移动文件夹；标已读 = 移除 `UNREAD` 标签）。
+
+**不支持**：发送 / 回复 / 转发（未申请 `mail:user_mailbox.message:send`）、删除邮件、改规则/联系人。
 
 - 类型：标准 Claude Code MCP 插件（区别于 `plugins/` 下的日报平台 Tinia 插件）。
 - 分发：经 felag-server 摄取 `mcp/feishu-mail/` 子树 → 签名 → `/dist` → 数字员工客户端装 `engine-home/plugins/feishu-mail/`。

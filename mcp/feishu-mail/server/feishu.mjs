@@ -23,8 +23,18 @@ const TOKEN_URL = `${AUTH_BASE}/open-apis/authen/v2/oauth/token`;
 //      mail:user_mailbox.message.body:read      获取邮件正文
 //      mail:user_mailbox.message.subject:read   获取邮件主题
 // 多条空格分隔;可用 FEISHU_MAIL_SCOPE 覆盖。
-const MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE ||
-  "mail:user_mailbox.message:readonly mail:user_mailbox.message.body:read mail:user_mailbox.message.subject:read";
+// 2026-07-28 扩:飞书后台已开通的其余邮箱权限一并请求 —— 修改邮件(标已读/打标签/移文件夹)、
+// 邮箱联系人、收信规则、邮箱元信息。⚠️ 加 scope 后老 token 不含新权限,用户须重新授权一次。
+// 🚫 未申请发信权限(mail:user_mailbox.message:send),故不提供发送/回复/转发。
+const MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || [
+  "mail:user_mailbox.message:readonly",
+  "mail:user_mailbox.message.body:read",
+  "mail:user_mailbox.message.subject:read",
+  "mail:user_mailbox.message:modify",
+  "mail:user_mailbox.mail_contact:read",
+  "mail:user_mailbox.rule:read",
+  "mail:user_mailbox:readonly",
+].join(" ");
 // 回调地址:飞书按白名单精确匹配、不放宽 loopback 端口,故用**固定**地址(非随机端口),
 // 且必须与飞书开放平台「安全设置 → 重定向 URL」登记的完全一致。可用 env 覆盖以对齐后台登记值。
 const REDIRECT_URI = process.env.FEISHU_REDIRECT_URI || "http://127.0.0.1:53170/callback";
@@ -203,14 +213,21 @@ function page(ok, msg) {
 // ── 邮件 REST(user_mailbox_id 用 "me") ──
 const MAIL_BASE = `${AUTH_BASE}/open-apis/mail/v1/user_mailboxes/me`;
 
-async function mailGet(pathAndQuery, token) {
-  const resp = await fetch(`${MAIL_BASE}${pathAndQuery}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
+async function mailReq(pathAndQuery, token, { method = "GET", body } = {}) {
+  const init = { method, headers: { Authorization: `Bearer ${token}` } };
+  if (body !== undefined) {
+    init.headers["Content-Type"] = "application/json; charset=utf-8";
+    init.body = JSON.stringify(body);
+  }
+  const resp = await fetch(`${MAIL_BASE}${pathAndQuery}`, init);
   const j = await resp.json();
   // 飞书业务码 99991668/99991679 = user token 无效/未授权
   if (j.code === 99991668 || j.code === 99991679) {
     throw new AuthError("飞书 user token 无效或未授权，需重新登录");
+  }
+  // 缺 scope(如新增能力后用户没重新授权)会返回权限类错误码,提示重新登录比让 AI 反复重试有用。
+  if (j.code === 99991672 || j.code === 99991644) {
+    throw new AuthError("飞书授权缺少该能力所需权限，请在客户端连接器页重新登录飞书以补授权");
   }
   if (!resp.ok || (j.code && j.code !== 0)) {
     throw new Error(`飞书接口错误: ${JSON.stringify(j)}`);
@@ -218,23 +235,93 @@ async function mailGet(pathAndQuery, token) {
   return j.data;
 }
 
+const mailGet = (pathAndQuery, token) => mailReq(pathAndQuery, token);
+
 export async function listFolders() {
   const token = await getAccessToken();
   return await mailGet(`/folders`, token);
 }
 
-export async function listMessages({ folder_id, page_token, page_size = 20 }) {
+// 列邮件。飞书要求 folder_id 与 label_id 必给其一(否则报 "must pass either folder_id or label_id");
+// page_size 上限 20(传更大直接报错)。only_unread 由接口原生支持,不必逐封读 label_ids 自己筛。
+export async function listMessages({ folder_id, label_id, page_token, page_size = 20, only_unread }) {
   const token = await getAccessToken();
   const q = new URLSearchParams();
   if (folder_id) q.set("folder_id", folder_id);
+  if (label_id) q.set("label_id", label_id);
   if (page_token) q.set("page_token", page_token);
-  q.set("page_size", String(page_size));
+  if (only_unread) q.set("only_unread", "true");
+  q.set("page_size", String(Math.min(page_size || 20, 20)));
   return await mailGet(`/messages?${q.toString()}`, token);
 }
 
 export async function getMessage({ message_id }) {
   const token = await getAccessToken();
   return await mailGet(`/messages/${encodeURIComponent(message_id)}`, token);
+}
+
+// 批量取详情:一次最多给一批 message_id,省掉逐封 get 的往返。
+// format: full(默认,含 html) / plain_text_full(纯文本正文) / metadata(只要头部,最省)。
+export async function getMessages({ message_ids, format = "plain_text_full" }) {
+  const token = await getAccessToken();
+  return await mailReq(`/messages/batch_get`, token, {
+    method: "POST",
+    body: { message_ids, format },
+  });
+}
+
+// 搜索邮件(POST /search)。query 是全文关键词;filter 支持发件人/收件人/主题/文件夹/标签/
+// 是否有附件/是否未读/时间区间。比逐页翻 + 逐封读快一个数量级。
+export async function searchMessages({ query, filter, page_token, page_size = 20 }) {
+  const token = await getAccessToken();
+  const q = new URLSearchParams();
+  if (page_token) q.set("page_token", page_token);
+  q.set("page_size", String(Math.min(page_size || 20, 20)));
+  const body = {};
+  if (query) body.query = query;
+  if (filter && Object.keys(filter).length) body.filter = filter;
+  return await mailReq(`/search?${q.toString()}`, token, { method: "POST", body });
+}
+
+// 取附件下载链接。⚠️ 飞书限制:每个链接只能用两次、有效期两小时,不要缓存转发。
+export async function attachmentLinks({ message_id, attachment_ids }) {
+  const token = await getAccessToken();
+  const q = new URLSearchParams();
+  for (const id of attachment_ids) q.append("attachment_ids", id);
+  return await mailGet(
+    `/messages/${encodeURIComponent(message_id)}/attachments/download_url?${q.toString()}`, token);
+}
+
+// 修改邮件:加/减标签(标已读 = 移除 UNREAD)、移动到文件夹。唯一的写操作。
+export async function modifyMessage({ message_id, add_label_ids, remove_label_ids, add_folder }) {
+  const token = await getAccessToken();
+  const body = {};
+  if (add_label_ids?.length) body.add_label_ids = add_label_ids;
+  if (remove_label_ids?.length) body.remove_label_ids = remove_label_ids;
+  if (add_folder) body.add_folder = add_folder;
+  if (!Object.keys(body).length) throw new Error("modify 至少要给一项:add_label_ids/remove_label_ids/add_folder");
+  return await mailReq(`/messages/${encodeURIComponent(message_id)}/modify`, token, {
+    method: "POST",
+    body,
+  });
+}
+
+export async function listLabels() {
+  const token = await getAccessToken();
+  return await mailGet(`/labels`, token);
+}
+
+export async function listContacts({ page_token, page_size = 20 } = {}) {
+  const token = await getAccessToken();
+  const q = new URLSearchParams();
+  if (page_token) q.set("page_token", page_token);
+  q.set("page_size", String(Math.min(page_size || 20, 20)));
+  return await mailGet(`/mail_contacts?${q.toString()}`, token);
+}
+
+export async function listRules() {
+  const token = await getAccessToken();
+  return await mailGet(`/rules`, token);
 }
 
 export async function status() {
