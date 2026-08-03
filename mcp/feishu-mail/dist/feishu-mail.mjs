@@ -30975,8 +30975,14 @@ var MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || [
   "mail:user_mailbox.mail_contact:read",
   "mail:user_mailbox.rule:read",
   "mail:user_mailbox:readonly",
-  "mail:user_mailbox.message:send"
+  "mail:user_mailbox.message:send",
   // 发送/回复/转发(2026-07-28 后台已开通)
+  // 2026-08-03 补:列邮件必须给 folder_id 或 label_id,而多数邮箱没有自定义标签
+  // (实测 labels 返回空),等于**列文件夹是读邮件的唯一入口**,漏了它整条读取链走不通。
+  "mail:user_mailbox.folder:read",
+  // 飞书 v2 OAuth 不给 offline_access 就**不下发 refresh_token**,token 2h 过期后
+  // getAccessToken 的刷新分支永远走不到 → 表现为"每两小时就得重新登录一次"。
+  "offline_access"
 ].join(" ");
 var REDIRECT_URI = process.env.FEISHU_REDIRECT_URI || "http://127.0.0.1:53170/callback";
 var _redir = new URL(REDIRECT_URI);
@@ -31148,11 +31154,14 @@ async function mailReq(pathAndQuery, token, { method = "GET", body } = {}) {
   }
   const resp = await fetch(`${MAIL_BASE}${pathAndQuery}`, init);
   const j = await resp.json();
-  if (j.code === 99991668 || j.code === 99991679) {
-    throw new AuthError("\u98DE\u4E66 user token \u65E0\u6548\u6216\u672A\u6388\u6743\uFF0C\u9700\u91CD\u65B0\u767B\u5F55");
+  if (j.code === 99991668) {
+    throw new AuthError("\u98DE\u4E66 user token \u65E0\u6548\u6216\u5DF2\u8FC7\u671F\uFF0C\u9700\u91CD\u65B0\u767B\u5F55");
   }
-  if (j.code === 99991672 || j.code === 99991644) {
-    throw new AuthError("\u98DE\u4E66\u6388\u6743\u7F3A\u5C11\u8BE5\u80FD\u529B\u6240\u9700\u6743\u9650\uFF0C\u8BF7\u5728\u5BA2\u6237\u7AEF\u8FDE\u63A5\u5668\u9875\u91CD\u65B0\u767B\u5F55\u98DE\u4E66\u4EE5\u8865\u6388\u6743");
+  if (j.code === 99991679 || j.code === 99991672 || j.code === 99991644) {
+    const need = [...new Set((j.msg || "").match(/mail:[A-Za-z_.:]+/g) || [])];
+    throw new AuthError(
+      need.length ? `\u98DE\u4E66\u6388\u6743\u7F3A\u5C11\u6743\u9650 [${need.join(", ")}] \u2014\u2014 \u91CD\u65B0\u767B\u5F55\u53EA\u5728\u8BE5\u6743\u9650\u5DF2\u4E8E\u98DE\u4E66\u5F00\u653E\u5E73\u53F0\u5F00\u901A\u5E76\u53D1\u5E03\u7248\u672C\u540E\u624D\u6709\u7528\uFF1B\u5426\u5219\u8BF7\u5148\u53BB\u540E\u53F0\u5F00\u901A\u3002` : `\u98DE\u4E66\u6388\u6743\u7F3A\u5C11\u8BE5\u80FD\u529B\u6240\u9700\u6743\u9650\uFF1A${j.msg || ""}`
+    );
   }
   if (!resp.ok || j.code && j.code !== 0) {
     throw new Error(`\u98DE\u4E66\u63A5\u53E3\u9519\u8BEF: ${JSON.stringify(j)}`);

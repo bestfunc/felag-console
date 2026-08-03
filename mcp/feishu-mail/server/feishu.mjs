@@ -34,6 +34,12 @@ const MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || [
   "mail:user_mailbox.rule:read",
   "mail:user_mailbox:readonly",
   "mail:user_mailbox.message:send",   // 发送/回复/转发(2026-07-28 后台已开通)
+  // 2026-08-03 补:列邮件必须给 folder_id 或 label_id,而多数邮箱没有自定义标签
+  // (实测 labels 返回空),等于**列文件夹是读邮件的唯一入口**,漏了它整条读取链走不通。
+  "mail:user_mailbox.folder:read",
+  // 飞书 v2 OAuth 不给 offline_access 就**不下发 refresh_token**,token 2h 过期后
+  // getAccessToken 的刷新分支永远走不到 → 表现为"每两小时就得重新登录一次"。
+  "offline_access",
 ].join(" ");
 // 回调地址:飞书按白名单精确匹配、不放宽 loopback 端口,故用**固定**地址(非随机端口),
 // 且必须与飞书开放平台「安全设置 → 重定向 URL」登记的完全一致。可用 env 覆盖以对齐后台登记值。
@@ -221,13 +227,19 @@ async function mailReq(pathAndQuery, token, { method = "GET", body } = {}) {
   }
   const resp = await fetch(`${MAIL_BASE}${pathAndQuery}`, init);
   const j = await resp.json();
-  // 飞书业务码 99991668/99991679 = user token 无效/未授权
-  if (j.code === 99991668 || j.code === 99991679) {
-    throw new AuthError("飞书 user token 无效或未授权，需重新登录");
+  // 99991668 = token 本身无效/过期;99991679 = token 有效但**缺某条 scope**。
+  // ⚠️ 两者必须分开报:曾把 99991679 也说成"token 无效需重新登录",而飞书的 msg 里
+  //    已写明缺哪条权限 —— 吞掉它会让人(和 AI)反复重新登录却永远好不了。
+  if (j.code === 99991668) {
+    throw new AuthError("飞书 user token 无效或已过期，需重新登录");
   }
-  // 缺 scope(如新增能力后用户没重新授权)会返回权限类错误码,提示重新登录比让 AI 反复重试有用。
-  if (j.code === 99991672 || j.code === 99991644) {
-    throw new AuthError("飞书授权缺少该能力所需权限，请在客户端连接器页重新登录飞书以补授权");
+  if (j.code === 99991679 || j.code === 99991672 || j.code === 99991644) {
+    const need = [...new Set((j.msg || "").match(/mail:[A-Za-z_.:]+/g) || [])];
+    throw new AuthError(
+      need.length
+        ? `飞书授权缺少权限 [${need.join(", ")}] —— 重新登录只在该权限已于飞书开放平台开通并发布版本后才有用；否则请先去后台开通。`
+        : `飞书授权缺少该能力所需权限：${j.msg || ""}`
+    );
   }
   if (!resp.ok || (j.code && j.code !== 0)) {
     throw new Error(`飞书接口错误: ${JSON.stringify(j)}`);
