@@ -30980,6 +30980,9 @@ var MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || [
   // 2026-08-03 补:列邮件必须给 folder_id 或 label_id,而多数邮箱没有自定义标签
   // (实测 labels 返回空),等于**列文件夹是读邮件的唯一入口**,漏了它整条读取链走不通。
   "mail:user_mailbox.folder:read",
+  // 2026-08-03 补:收发件人是飞书的**字段级敏感权限**,不开这条 get/batch_get 就静默不返回
+  // head_from/to/cc/reply_to(SDK 类型里有、响应里没有),reply/forward 因此取不到回信地址。
+  "mail:user_mailbox.message.address:read",
   // 飞书 v2 OAuth 不给 offline_access 就**不下发 refresh_token**,token 2h 过期后
   // getAccessToken 的刷新分支永远走不到 → 表现为"每两小时就得重新登录一次"。
   "offline_access"
@@ -31183,26 +31186,78 @@ async function listMessages({ folder_id, label_id, page_token, page_size = 20, o
   q.set("page_size", String(Math.min(page_size || 20, 20)));
   return await mailGet(`/messages?${q.toString()}`, token);
 }
+function withIsoTime(m) {
+  if (!m || typeof m !== "object" || m.create_time || !m.internal_date) return m;
+  const ms = Number(m.internal_date);
+  if (!Number.isFinite(ms)) return m;
+  return { ...m, create_time: new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z") };
+}
+function withReplyable(m) {
+  if (!m || typeof m !== "object") return m;
+  const addr = m.reply_to || m.head_from?.mail_address || "";
+  return {
+    ...m,
+    replyable: Boolean(addr),
+    ...addr ? {} : { replyable_hint: "\u672C\u6B21\u8FD4\u56DE\u4E0D\u542B\u53D1\u4EF6\u4EBA\u5730\u5740(\u98DE\u4E66\u672A\u4E0B\u53D1 head_from/reply_to)\uFF0C\u56DE\u590D\u8BF7\u7528 search_messages \u53D6 meta_data.from.mail_address \u540E\u663E\u5F0F\u4F20 to" }
+  };
+}
 async function getMessage({ message_id }) {
   const token = await getAccessToken();
-  return await mailGet(`/messages/${encodeURIComponent(message_id)}`, token);
+  const d = await mailGet(`/messages/${encodeURIComponent(message_id)}`, token);
+  if (d?.message) d.message = withReplyable(withIsoTime(d.message));
+  return d;
 }
 async function getMessages({ message_ids, format = "plain_text_full" }) {
   const token = await getAccessToken();
-  return await mailReq(`/messages/batch_get`, token, {
+  const d = await mailReq(`/messages/batch_get`, token, {
     method: "POST",
     body: { message_ids, format }
   });
+  if (Array.isArray(d?.messages)) d.messages = d.messages.map((m) => withReplyable(withIsoTime(m)));
+  return d;
 }
-async function searchMessages({ query, filter, page_token, page_size = 20 }) {
+var SEARCH_PAGE_MAX = 15;
+function toIsoTime(v) {
+  if (v == null || v === "") return v;
+  const s = String(v).trim();
+  if (!/^\d+$/.test(s)) return s;
+  const n = Number(s);
+  const ms = s.length <= 10 ? n * 1e3 : n;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? s : d.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+async function searchMessages({ query, filter, page_token, page_size = SEARCH_PAGE_MAX }) {
   const token = await getAccessToken();
   const q = new URLSearchParams();
   if (page_token) q.set("page_token", page_token);
-  q.set("page_size", String(Math.min(page_size || 20, 20)));
+  q.set("page_size", String(Math.min(page_size || SEARCH_PAGE_MAX, SEARCH_PAGE_MAX)));
   const body = {};
   if (query) body.query = query;
-  if (filter && Object.keys(filter).length) body.filter = filter;
-  return await mailReq(`/search?${q.toString()}`, token, { method: "POST", body });
+  if (filter && Object.keys(filter).length) {
+    const f = { ...filter };
+    if (f.create_time) {
+      f.create_time = {
+        ...f.create_time.start_time ? { start_time: toIsoTime(f.create_time.start_time) } : {},
+        ...f.create_time.end_time ? { end_time: toIsoTime(f.create_time.end_time) } : {}
+      };
+    }
+    body.filter = f;
+  }
+  const d = await mailReq(`/search?${q.toString()}`, token, { method: "POST", body });
+  if (Array.isArray(d?.items)) {
+    d.items = d.items.map((it) => {
+      const md = it.meta_data || {};
+      return {
+        ...it,
+        message_id: it.id,
+        subject: md.subject,
+        from: md.from,
+        create_time: md.create_time
+        // 已是 ISO 8601,与补齐后的 get 口径一致
+      };
+    });
+  }
+  return d;
 }
 async function attachmentLinks({ message_id, attachment_ids }) {
   const token = await getAccessToken();
@@ -31281,13 +31336,17 @@ function quoteBlock(m) {
 
 ` + (m.body_plain_text || m.body_preview || "(\u539F\u6587\u6B63\u6587\u4E0D\u53EF\u7528)");
 }
-async function replyMessage({ message_id, body_plain_text, reply_all = false, extra_to = [] }) {
+async function replyMessage({ message_id, body_plain_text, reply_all = false, extra_to = [], to: explicitTo }) {
   if (!body_plain_text) throw new Error("\u7F3A\u56DE\u590D\u6B63\u6587 body_plain_text");
   const d = await getMessage({ message_id });
   const m = d?.message || d;
   if (!m) throw new Error("\u539F\u90AE\u4EF6\u4E0D\u5B58\u5728");
-  const replyTo = m.reply_to || m.head_from?.mail_address;
-  if (!replyTo) throw new Error("\u539F\u90AE\u4EF6\u6CA1\u6709\u53EF\u56DE\u590D\u7684\u53D1\u4EF6\u4EBA\u5730\u5740");
+  const replyTo = explicitTo || m.reply_to || m.head_from?.mail_address;
+  if (!replyTo) {
+    throw new Error(
+      "\u53D6\u4E0D\u5230\u539F\u90AE\u4EF6\u7684\u53D1\u4EF6\u4EBA\u5730\u5740\uFF1A\u98DE\u4E66 get/batch_get \u672A\u4E0B\u53D1 head_from/reply_to(\u5B57\u6BB5\u7EA7\u6743\u9650\u672A\u5F00\u901A)\u3002\u8BF7\u7528 search_messages \u627E\u5230\u8BE5\u90AE\u4EF6\u3001\u53D6 meta_data.from.mail_address\uFF0C\u518D\u628A\u5B83\u4F5C\u4E3A to \u53C2\u6570\u663E\u5F0F\u4F20\u5165 reply_message\u3002"
+    );
+  }
   const to = [replyTo, ...extra_to];
   let cc = [];
   if (reply_all) {
@@ -31358,7 +31417,7 @@ async function serve() {
     "list_messages",
     {
       title: "\u5217\u51FA\u98DE\u4E66\u90AE\u4EF6",
-      description: "\u5217\u51FA\u90AE\u4EF6\u6458\u8981(\u4E3B\u9898/\u53D1\u4EF6\u4EBA/\u65F6\u95F4/message_id/label_ids)\u3002\u26A0\uFE0F folder_id \u4E0E label_id \u5FC5\u987B\u7ED9\u5176\u4E00(\u90FD\u4E0D\u7ED9\u4F1A\u62A5 must pass either folder_id or label_id)\uFF1Bpage_size \u4E0A\u9650 20\uFF1B\u7FFB\u9875\u628A\u8FD4\u56DE\u7684 page_token \u56DE\u4F20\u3002\u53EA\u8981\u672A\u8BFB\u7528 only_unread=true\uFF0C\u4E0D\u8981\u9010\u5C01\u8BFB label_ids \u81EA\u5DF1\u7B5B\u3002\u6309\u4E3B\u9898/\u53D1\u4EF6\u4EBA/\u5173\u952E\u8BCD\u627E\u90AE\u4EF6\u8BF7\u6539\u7528 search_messages\uFF0C\u522B\u5728\u8FD9\u91CC\u7FFB\u9875\u78B0\u8FD0\u6C14\u3002",
+      description: "\u6309\u6587\u4EF6\u5939/\u6807\u7B7E\u5217\u51FA\u90AE\u4EF6 id\u3002\u26A0\uFE0F folder_id \u4E0E label_id \u5FC5\u987B\u7ED9\u5176\u4E00(\u90FD\u4E0D\u7ED9\u4F1A\u62A5 must pass either folder_id or label_id)\uFF1Bpage_size \u4E0A\u9650 20\uFF1B\u7FFB\u9875\u628A\u8FD4\u56DE\u7684 page_token \u56DE\u4F20\u3002\u53EA\u8981\u672A\u8BFB\u7528 only_unread=true\uFF0C\u522B\u9010\u5C01\u8BFB label_ids \u81EA\u5DF1\u7B5B\u3002\u26A0\uFE0F \u672C\u63A5\u53E3**\u6CA1\u6709\u65F6\u95F4\u8FC7\u6EE4\u3001\u4E5F\u4E0D\u80FD\u53CD\u5411\u6392\u5E8F**(\u98DE\u4E66\u672A\u63D0\u4F9B\uFF0C\u4F20 start_time/sort_order \u4E4B\u7C7B\u4F1A\u88AB\u9759\u9ED8\u5FFD\u7565)\u3002\u8981\u6309\u65F6\u95F4\u8303\u56F4\u627E\u90AE\u4EF6\u3001\u6216\u627E\u67D0\u4E2A\u6708\u4EFD/\u6700\u65E9\u7684\u90AE\u4EF6\uFF0C\u4E00\u5F8B\u6539\u7528 search_messages \u7684 filter.create_time \u5F00\u7A97\uFF0C**\u4E0D\u8981\u5728\u8FD9\u91CC\u4E00\u9875\u9875\u7FFB**\u3002",
       inputSchema: {
         folder_id: external_exports.string().optional().describe("\u6587\u4EF6\u5939 id(\u6765\u81EA list_folders)\uFF1B\u4E0E label_id \u4E8C\u9009\u4E00"),
         label_id: external_exports.string().optional().describe("\u6807\u7B7E id(\u6765\u81EA list_labels)\uFF1B\u4E0E folder_id \u4E8C\u9009\u4E00"),
@@ -31373,7 +31432,7 @@ async function serve() {
     "search_messages",
     {
       title: "\u641C\u7D22\u98DE\u4E66\u90AE\u4EF6",
-      description: "\u6309\u5173\u952E\u8BCD/\u6761\u4EF6\u641C\u7D22\u90AE\u4EF6\uFF0C\u66FF\u4EE3\u9010\u9875\u7FFB\u627E\u3002query \u662F\u5168\u6587\u5173\u952E\u8BCD\uFF1Bfilter \u53EF\u6309\u53D1\u4EF6\u4EBA\u3001\u6536\u4EF6\u4EBA\u3001\u4E3B\u9898\u3001\u6587\u4EF6\u5939\u3001\u6807\u7B7E\u3001\u662F\u5426\u5E26\u9644\u4EF6\u3001\u662F\u5426\u672A\u8BFB\u3001\u65F6\u95F4\u533A\u95F4\u7B5B\u3002page_size \u4E0A\u9650 20\uFF0C\u7FFB\u9875\u7528 page_token\u3002",
+      description: "\u6309\u5173\u952E\u8BCD/\u6761\u4EF6\u641C\u7D22\u90AE\u4EF6\uFF0C\u66FF\u4EE3\u9010\u9875\u7FFB\u627E\u3002query \u662F\u5168\u6587\u5173\u952E\u8BCD\uFF1Bfilter \u53EF\u6309\u53D1\u4EF6\u4EBA\u3001\u6536\u4EF6\u4EBA\u3001\u4E3B\u9898\u3001\u6587\u4EF6\u5939\u3001\u6807\u7B7E\u3001\u662F\u5426\u5E26\u9644\u4EF6\u3001\u662F\u5426\u672A\u8BFB\u3001\u65F6\u95F4\u533A\u95F4\u7B5B\u3002**page_size \u4E0A\u9650 15**(\u4E0E list_messages \u7684 20 \u4E0D\u540C)\u3002\u8FD4\u56DE\u6BCF\u6761\u542B message_id / subject / from / create_time(ISO 8601)\u3002\u26A0\uFE0F \u7ED3\u679C**\u6052\u6309\u65F6\u95F4\u5012\u5E8F**\uFF0C\u98DE\u4E66\u4E0D\u63D0\u4F9B\u6392\u5E8F\u53C2\u6570\u3002\u8981\u627E\u6700\u65E9\u7684\u90AE\u4EF6\uFF0C\u7528 filter.create_time \u5F00\u7A97\u4E8C\u5206(\u5148\u8BD5\u4E00\u4E2A\u5BBD\u7A97\uFF0C\u6709\u7ED3\u679C\u5C31\u5F80\u65E9\u7684\u4E00\u534A\u6536\u7A84)\uFF0C\u522B\u7FFB\u5230\u6700\u540E\u4E00\u9875\u3002\u26A0\uFE0F \u53EA\u6709\u672C\u5DE5\u5177\u80FD\u62FF\u5230\u53D1\u4EF6\u4EBA\u5730\u5740(meta_data.from)\uFF0Cget_message \u62FF\u4E0D\u5230 \u2014\u2014 \u8981\u56DE\u590D\u67D0\u5C01\u90AE\u4EF6\uFF0C\u5148\u7528\u5B83\u53D6 from.mail_address\uFF0C\u518D\u663E\u5F0F\u4F20\u7ED9 reply_message \u7684 to\u3002",
       inputSchema: {
         query: external_exports.string().optional().describe("\u5168\u6587\u5173\u952E\u8BCD\uFF0C\u5982 \u201C\u62A5\u4EF7 IBC\u201D"),
         filter: external_exports.object({
@@ -31386,10 +31445,10 @@ async function serve() {
           label: external_exports.array(external_exports.string()).optional().describe("\u9650\u5B9A\u6807\u7B7E id"),
           has_attachment: external_exports.boolean().optional(),
           is_unread: external_exports.boolean().optional(),
-          create_time: external_exports.object({ start_time: external_exports.string().optional(), end_time: external_exports.string().optional() }).optional().describe("\u65F6\u95F4\u533A\u95F4(\u6BEB\u79D2\u65F6\u95F4\u6233\u5B57\u7B26\u4E32)")
+          create_time: external_exports.object({ start_time: external_exports.string().optional(), end_time: external_exports.string().optional() }).optional().describe('\u65F6\u95F4\u533A\u95F4\uFF0CISO 8601 \u5B57\u7B26\u4E32\uFF0C\u5982 "2026-05-01T00:00:00Z"(\u4F20\u6BEB\u79D2\u65F6\u95F4\u6233\u4F1A\u81EA\u52A8\u8F6C\u6362\uFF0C\u4F46\u8BF7\u76F4\u63A5\u7ED9 ISO)')
         }).optional(),
         page_token: external_exports.string().optional(),
-        page_size: external_exports.number().int().min(1).max(20).optional().describe("\u4E0A\u9650 20")
+        page_size: external_exports.number().int().min(1).max(15).optional().describe("\u4E0A\u9650 15(\u5B9E\u6D4B 16 \u5373\u62A5\u9519)\uFF0C\u9ED8\u8BA4 15")
       }
     },
     async (args) => call(() => searchMessages(args || {}))
@@ -31398,7 +31457,7 @@ async function serve() {
     "get_message",
     {
       title: "\u8BFB\u53D6\u98DE\u4E66\u90AE\u4EF6\u5168\u6587",
-      description: "\u6309 message_id \u8BFB\u53D6\u5355\u5C01\u90AE\u4EF6\u5B8C\u6574\u5185\u5BB9(\u6B63\u6587/\u6536\u53D1\u4EF6\u4EBA/\u9644\u4EF6\u5217\u8868)\u3002\u8981\u8BFB\u591A\u5C01\u8BF7\u7528 get_messages \u6279\u91CF\u53D6\u3002",
+      description: "\u6309 message_id \u8BFB\u53D6\u5355\u5C01\u90AE\u4EF6\u5B8C\u6574\u5185\u5BB9(\u6B63\u6587/\u9644\u4EF6\u5217\u8868/\u65F6\u95F4)\u3002\u8981\u8BFB\u591A\u5C01\u8BF7\u7528 get_messages \u6279\u91CF\u53D6\u3002\u8FD4\u56DE\u8865\u4E86 create_time(ISO 8601\uFF0C\u7531 internal_date \u6362\u7B97\uFF0C\u4FBF\u4E8E\u4E0E search_messages \u5BF9\u6BD4)\u3002\u26A0\uFE0F \u6536\u53D1\u4EF6\u4EBA\u5730\u5740\u5C5E\u98DE\u4E66\u300C\u654F\u611F\u5B57\u6BB5\u300D\uFF0C\u672A\u5F00\u901A\u300C\u83B7\u53D6\u90AE\u4EF6\u5185\u5BB9\u4E2D\u5730\u5740\u76F8\u5173\u5B57\u6BB5\u300D\u6743\u9650\u65F6**\u4E0D\u4F1A\u8FD4\u56DE**\uFF1B\u6B64\u65F6\u8FD4\u56DE\u91CC replyable=false\uFF0C\u8981\u56DE\u590D\u8BF7\u7528 search_messages \u53D6 meta_data.from.mail_address\u3002",
       inputSchema: {
         message_id: external_exports.string().describe("\u90AE\u4EF6 id(\u6765\u81EA list_messages / search_messages)")
       }
@@ -31494,10 +31553,11 @@ async function serve() {
     "reply_message",
     {
       title: "\u56DE\u590D\u98DE\u4E66\u90AE\u4EF6",
-      description: "\u56DE\u590D\u67D0\u5C01\u90AE\u4EF6:\u81EA\u52A8\u53D6\u539F\u53D1\u4EF6\u4EBA\u4E3A\u6536\u4EF6\u4EBA\u3001\u4E3B\u9898\u8865 Re:\u3001\u6B63\u6587\u540E\u9644\u539F\u6587\u5F15\u7528\u3002reply_all=true \u65F6\u628A\u539F\u6536\u4EF6\u4EBA/\u6284\u9001\u4E00\u5E76\u6284\u9001(\u5DF2\u5254\u9664\u81EA\u5DF1)\u3002\u26A0\uFE0F \u4E0D\u53EF\u9006:**\u5148\u628A\u56DE\u590D\u6B63\u6587\u5FF5\u7ED9\u7528\u6237\u786E\u8BA4\u518D\u8C03\u7528**\u3002\u6CE8\u610F:\u672C\u5DE5\u5177\u4E0D\u643A\u5E26 In-Reply-To \u5934\uFF0C\u56DE\u590D\u9760\u4E3B\u9898\u805A\u5408\u3001\u4E0D\u4FDD\u8BC1\u4E32\u8FDB\u539F\u4F1A\u8BDD\u7EBF\u7A0B\u3002",
+      description: "\u56DE\u590D\u67D0\u5C01\u90AE\u4EF6:\u4E3B\u9898\u8865 Re:\u3001\u6B63\u6587\u540E\u9644\u539F\u6587\u5F15\u7528\u3002\u6536\u4EF6\u4EBA\u4F18\u5148\u7528\u4F60\u4F20\u7684 to\uFF1B\u4E0D\u4F20\u5219\u5C1D\u8BD5\u53D6\u539F\u53D1\u4EF6\u4EBA\u3002reply_all=true \u65F6\u628A\u539F\u6536\u4EF6\u4EBA/\u6284\u9001\u4E00\u5E76\u6284\u9001(\u5DF2\u5254\u9664\u81EA\u5DF1)\u3002\u26A0\uFE0F \u4E0D\u53EF\u9006:**\u5148\u628A\u56DE\u590D\u6B63\u6587\u5FF5\u7ED9\u7528\u6237\u786E\u8BA4\u518D\u8C03\u7528**\u3002\u26A0\uFE0F \u82E5\u62A5\u300C\u53D6\u4E0D\u5230\u539F\u90AE\u4EF6\u7684\u53D1\u4EF6\u4EBA\u5730\u5740\u300D\uFF0C\u4E0D\u662F\u8FD9\u5C01\u90AE\u4EF6\u4E0D\u80FD\u56DE\u590D \u2014\u2014 \u662F\u98DE\u4E66\u672A\u4E0B\u53D1\u5730\u5740\u5B57\u6BB5\u3002\u6539\u7528 search_messages \u627E\u5230\u8BE5\u90AE\u4EF6\u3001\u53D6 meta_data.from.mail_address\uFF0C\u4F5C\u4E3A to \u4F20\u8FDB\u6765\u5373\u53EF\u3002\u6CE8\u610F:\u672C\u5DE5\u5177\u4E0D\u643A\u5E26 In-Reply-To \u5934\uFF0C\u56DE\u590D\u9760\u4E3B\u9898\u805A\u5408\u3001\u4E0D\u4FDD\u8BC1\u4E32\u8FDB\u539F\u4F1A\u8BDD\u7EBF\u7A0B\u3002",
       inputSchema: {
         message_id: external_exports.string().describe("\u88AB\u56DE\u590D\u7684\u90AE\u4EF6 id"),
         body_plain_text: external_exports.string().describe("\u4F60\u8981\u56DE\u590D\u7684\u6B63\u6587(\u5F15\u7528\u5757\u4F1A\u81EA\u52A8\u9644\u5728\u540E\u9762)"),
+        to: external_exports.string().optional().describe("\u6536\u4EF6\u4EBA\u5730\u5740\uFF1B\u539F\u90AE\u4EF6\u53D6\u4E0D\u5230\u53D1\u4EF6\u4EBA\u65F6\u5FC5\u4F20(\u6765\u81EA search_messages \u7684 meta_data.from.mail_address)"),
         reply_all: external_exports.boolean().optional().describe("\u662F\u5426\u56DE\u590D\u5168\u90E8\uFF0C\u9ED8\u8BA4 false"),
         extra_to: external_exports.array(external_exports.string()).optional().describe("\u989D\u5916\u6536\u4EF6\u4EBA")
       }

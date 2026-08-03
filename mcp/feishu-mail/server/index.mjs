@@ -45,11 +45,12 @@ async function serve() {
     {
       title: "列出飞书邮件",
       description:
-        "列出邮件摘要(主题/发件人/时间/message_id/label_ids)。" +
-        "⚠️ folder_id 与 label_id 必须给其一(都不给会报 must pass either folder_id or label_id)；" +
-        "page_size 上限 20；翻页把返回的 page_token 回传。" +
-        "只要未读用 only_unread=true，不要逐封读 label_ids 自己筛。" +
-        "按主题/发件人/关键词找邮件请改用 search_messages，别在这里翻页碰运气。",
+        "按文件夹/标签列出邮件 id。⚠️ folder_id 与 label_id 必须给其一" +
+        "(都不给会报 must pass either folder_id or label_id)；page_size 上限 20；" +
+        "翻页把返回的 page_token 回传。只要未读用 only_unread=true，别逐封读 label_ids 自己筛。" +
+        "⚠️ 本接口**没有时间过滤、也不能反向排序**(飞书未提供，传 start_time/sort_order 之类会被静默忽略)。" +
+        "要按时间范围找邮件、或找某个月份/最早的邮件，一律改用 search_messages 的 filter.create_time 开窗，" +
+        "**不要在这里一页页翻**。",
       inputSchema: {
         folder_id: z.string().optional().describe("文件夹 id(来自 list_folders)；与 label_id 二选一"),
         label_id: z.string().optional().describe("标签 id(来自 list_labels)；与 folder_id 二选一"),
@@ -67,7 +68,12 @@ async function serve() {
       title: "搜索飞书邮件",
       description:
         "按关键词/条件搜索邮件，替代逐页翻找。query 是全文关键词；filter 可按发件人、收件人、" +
-        "主题、文件夹、标签、是否带附件、是否未读、时间区间筛。page_size 上限 20，翻页用 page_token。",
+        "主题、文件夹、标签、是否带附件、是否未读、时间区间筛。**page_size 上限 15**(与 list_messages 的 20 不同)。" +
+        "返回每条含 message_id / subject / from / create_time(ISO 8601)。" +
+        "⚠️ 结果**恒按时间倒序**，飞书不提供排序参数。要找最早的邮件，用 filter.create_time 开窗二分" +
+        "(先试一个宽窗，有结果就往早的一半收窄)，别翻到最后一页。" +
+        "⚠️ 只有本工具能拿到发件人地址(meta_data.from)，get_message 拿不到 —— 要回复某封邮件，" +
+        "先用它取 from.mail_address，再显式传给 reply_message 的 to。",
       inputSchema: {
         query: z.string().optional().describe("全文关键词，如 “报价 IBC”"),
         filter: z
@@ -84,11 +90,11 @@ async function serve() {
             create_time: z
               .object({ start_time: z.string().optional(), end_time: z.string().optional() })
               .optional()
-              .describe("时间区间(毫秒时间戳字符串)"),
+              .describe('时间区间，ISO 8601 字符串，如 "2026-05-01T00:00:00Z"(传毫秒时间戳会自动转换，但请直接给 ISO)'),
           })
           .optional(),
         page_token: z.string().optional(),
-        page_size: z.number().int().min(1).max(20).optional().describe("上限 20"),
+        page_size: z.number().int().min(1).max(15).optional().describe("上限 15(实测 16 即报错)，默认 15"),
       },
     },
     async (args) => call(() => feishu.searchMessages(args || {}))
@@ -98,7 +104,11 @@ async function serve() {
     "get_message",
     {
       title: "读取飞书邮件全文",
-      description: "按 message_id 读取单封邮件完整内容(正文/收发件人/附件列表)。要读多封请用 get_messages 批量取。",
+      description:
+        "按 message_id 读取单封邮件完整内容(正文/附件列表/时间)。要读多封请用 get_messages 批量取。" +
+        "返回补了 create_time(ISO 8601，由 internal_date 换算，便于与 search_messages 对比)。" +
+        "⚠️ 收发件人地址属飞书「敏感字段」，未开通「获取邮件内容中地址相关字段」权限时**不会返回**；" +
+        "此时返回里 replyable=false，要回复请用 search_messages 取 meta_data.from.mail_address。",
       inputSchema: {
         message_id: z.string().describe("邮件 id(来自 list_messages / search_messages)"),
       },
@@ -213,13 +223,16 @@ async function serve() {
     {
       title: "回复飞书邮件",
       description:
-        "回复某封邮件:自动取原发件人为收件人、主题补 Re:、正文后附原文引用。" +
+        "回复某封邮件:主题补 Re:、正文后附原文引用。收件人优先用你传的 to；不传则尝试取原发件人。" +
         "reply_all=true 时把原收件人/抄送一并抄送(已剔除自己)。" +
         "⚠️ 不可逆:**先把回复正文念给用户确认再调用**。" +
+        "⚠️ 若报「取不到原邮件的发件人地址」，不是这封邮件不能回复 —— 是飞书未下发地址字段。" +
+        "改用 search_messages 找到该邮件、取 meta_data.from.mail_address，作为 to 传进来即可。" +
         "注意:本工具不携带 In-Reply-To 头，回复靠主题聚合、不保证串进原会话线程。",
       inputSchema: {
         message_id: z.string().describe("被回复的邮件 id"),
         body_plain_text: z.string().describe("你要回复的正文(引用块会自动附在后面)"),
+        to: z.string().optional().describe("收件人地址；原邮件取不到发件人时必传(来自 search_messages 的 meta_data.from.mail_address)"),
         reply_all: z.boolean().optional().describe("是否回复全部，默认 false"),
         extra_to: z.array(z.string()).optional().describe("额外收件人"),
       },

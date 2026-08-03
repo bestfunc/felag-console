@@ -37,6 +37,9 @@ const MAIL_SCOPE = process.env.FEISHU_MAIL_SCOPE || [
   // 2026-08-03 补:列邮件必须给 folder_id 或 label_id,而多数邮箱没有自定义标签
   // (实测 labels 返回空),等于**列文件夹是读邮件的唯一入口**,漏了它整条读取链走不通。
   "mail:user_mailbox.folder:read",
+  // 2026-08-03 补:收发件人是飞书的**字段级敏感权限**,不开这条 get/batch_get 就静默不返回
+  // head_from/to/cc/reply_to(SDK 类型里有、响应里没有),reply/forward 因此取不到回信地址。
+  "mail:user_mailbox.message.address:read",
   // 飞书 v2 OAuth 不给 offline_access 就**不下发 refresh_token**,token 2h 过期后
   // getAccessToken 的刷新分支永远走不到 → 表现为"每两小时就得重新登录一次"。
   "offline_access",
@@ -267,32 +270,101 @@ export async function listMessages({ folder_id, label_id, page_token, page_size 
   return await mailGet(`/messages?${q.toString()}`, token);
 }
 
+// 时间口径统一。飞书两条路径给两种格式:list/get/batch_get 给 `internal_date`(epoch 毫秒
+// 字符串),search 给 `meta_data.create_time`(ISO 8601)。两者无法直接比对,故凡是带
+// internal_date 的返回都**补**一个 ISO 的 `create_time`(不动原字段,保持向后兼容)。
+function withIsoTime(m) {
+  if (!m || typeof m !== "object" || m.create_time || !m.internal_date) return m;
+  const ms = Number(m.internal_date);
+  if (!Number.isFinite(ms)) return m;
+  return { ...m, create_time: new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z") };
+}
+
+// 原邮件能否回复。⚠️ 飞书 get/batch_get **不返回** head_from/to/cc(SDK 类型里有、实际响应
+// 里没有,应为字段级 scope 未开通),所以这里多数情况只能判成 false —— 这不是"该邮件不可回复",
+// 而是"本 token 读不到发件人"。reply_message 因此支持显式传 to 绕过。
+function withReplyable(m) {
+  if (!m || typeof m !== "object") return m;
+  const addr = m.reply_to || m.head_from?.mail_address || "";
+  return {
+    ...m,
+    replyable: Boolean(addr),
+    ...(addr ? {} : { replyable_hint: "本次返回不含发件人地址(飞书未下发 head_from/reply_to)，回复请用 search_messages 取 meta_data.from.mail_address 后显式传 to" }),
+  };
+}
+
 export async function getMessage({ message_id }) {
   const token = await getAccessToken();
-  return await mailGet(`/messages/${encodeURIComponent(message_id)}`, token);
+  const d = await mailGet(`/messages/${encodeURIComponent(message_id)}`, token);
+  if (d?.message) d.message = withReplyable(withIsoTime(d.message));
+  return d;
 }
 
 // 批量取详情:一次最多给一批 message_id,省掉逐封 get 的往返。
 // format: full(默认,含 html) / plain_text_full(纯文本正文) / metadata(只要头部,最省)。
 export async function getMessages({ message_ids, format = "plain_text_full" }) {
   const token = await getAccessToken();
-  return await mailReq(`/messages/batch_get`, token, {
+  const d = await mailReq(`/messages/batch_get`, token, {
     method: "POST",
     body: { message_ids, format },
   });
+  if (Array.isArray(d?.messages)) d.messages = d.messages.map((m) => withReplyable(withIsoTime(m)));
+  return d;
+}
+
+// search 的 page_size **实测上限 15**(16 起报 1231021 page size is over the limit),
+// 与 list_messages 的 20 不同,别照抄。
+const SEARCH_PAGE_MAX = 15;
+
+// filter.create_time 只认 ISO 8601("2026-05-01T00:00:00Z");传 epoch 毫秒/秒会被飞书
+// 以 99992402 field validation failed 拒掉。调用方(AI)极易传毫秒,故这里**兼容转换**。
+function toIsoTime(v) {
+  if (v == null || v === "") return v;
+  const s = String(v).trim();
+  if (!/^\d+$/.test(s)) return s;                       // 已是 ISO,原样过
+  const n = Number(s);
+  const ms = s.length <= 10 ? n * 1000 : n;             // 10 位=秒,13 位=毫秒
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? s : d.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
 
 // 搜索邮件(POST /search)。query 是全文关键词;filter 支持发件人/收件人/主题/文件夹/标签/
 // 是否有附件/是否未读/时间区间。比逐页翻 + 逐封读快一个数量级。
-export async function searchMessages({ query, filter, page_token, page_size = 20 }) {
+// ⚠️ 结果**恒按时间倒序**,飞书不提供排序参数(sort_order/order_by/sort_type 实测均被静默
+//    忽略)。要找最早的邮件,用 filter.create_time 开窗二分,别指望翻到最后一页。
+export async function searchMessages({ query, filter, page_token, page_size = SEARCH_PAGE_MAX }) {
   const token = await getAccessToken();
   const q = new URLSearchParams();
   if (page_token) q.set("page_token", page_token);
-  q.set("page_size", String(Math.min(page_size || 20, 20)));
+  q.set("page_size", String(Math.min(page_size || SEARCH_PAGE_MAX, SEARCH_PAGE_MAX)));
   const body = {};
   if (query) body.query = query;
-  if (filter && Object.keys(filter).length) body.filter = filter;
-  return await mailReq(`/search?${q.toString()}`, token, { method: "POST", body });
+  if (filter && Object.keys(filter).length) {
+    const f = { ...filter };
+    if (f.create_time) {
+      f.create_time = {
+        ...(f.create_time.start_time ? { start_time: toIsoTime(f.create_time.start_time) } : {}),
+        ...(f.create_time.end_time ? { end_time: toIsoTime(f.create_time.end_time) } : {}),
+      };
+    }
+    body.filter = f;
+  }
+  const d = await mailReq(`/search?${q.toString()}`, token, { method: "POST", body });
+  // 原始结果每条是 {id, display_info, meta_data},display_info 是塞了 <h> 高亮标记的
+  // 拼接文本 —— 对模型是噪音。把 meta_data 提到顶层给出规整字段,原字段保留不删。
+  if (Array.isArray(d?.items)) {
+    d.items = d.items.map((it) => {
+      const md = it.meta_data || {};
+      return {
+        ...it,
+        message_id: it.id,
+        subject: md.subject,
+        from: md.from,
+        create_time: md.create_time,          // 已是 ISO 8601,与补齐后的 get 口径一致
+      };
+    });
+  }
+  return d;
 }
 
 // 取附件下载链接。⚠️ 飞书限制:每个链接只能用两次、有效期两小时,不要缓存转发。
@@ -383,13 +455,20 @@ function quoteBlock(m) {
 
 // 回复:读原件 → 收件人取原发件人(有 reply_to 优先) → 主题补 Re: → 正文附引用块。
 // reply_all=true 时把原 to/cc 一并抄送(已剔除自己)。
-export async function replyMessage({ message_id, body_plain_text, reply_all = false, extra_to = [] }) {
+export async function replyMessage({ message_id, body_plain_text, reply_all = false, extra_to = [], to: explicitTo }) {
   if (!body_plain_text) throw new Error("缺回复正文 body_plain_text");
   const d = await getMessage({ message_id });
   const m = d?.message || d;
   if (!m) throw new Error("原邮件不存在");
-  const replyTo = m.reply_to || m.head_from?.mail_address;
-  if (!replyTo) throw new Error("原邮件没有可回复的发件人地址");
+  // 优先用调用方显式给的地址:飞书 get/batch_get 多数情况不下发 head_from/reply_to,
+  // 没有它并不代表"这封邮件不能回复"(旧版就是这么误报的)。
+  const replyTo = explicitTo || m.reply_to || m.head_from?.mail_address;
+  if (!replyTo) {
+    throw new Error(
+      "取不到原邮件的发件人地址：飞书 get/batch_get 未下发 head_from/reply_to(字段级权限未开通)。" +
+      "请用 search_messages 找到该邮件、取 meta_data.from.mail_address，再把它作为 to 参数显式传入 reply_message。"
+    );
+  }
   const to = [replyTo, ...extra_to];
   let cc = [];
   if (reply_all) {

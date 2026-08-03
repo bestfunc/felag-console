@@ -13,8 +13,8 @@ description: 读写当前用户的飞书邮箱。当用户要求查看/总结/�
 |---|---|---|
 | `feishu__list_folders` | 列文件夹，拿 `folder_id` | 无参数 |
 | `feishu__list_labels` | 列标签，拿 `label_id`（含未读等系统标签）、看各标签未读数 | 无参数 |
-| `feishu__list_messages` | 列某文件夹/标签下的邮件摘要 | **`folder_id` 与 `label_id` 必须给其一**；`page_size` **上限 20**；翻页把上次返回的 `page_token` 回传；只看未读用 `only_unread: true` |
-| `feishu__search_messages` | 按关键词/条件搜邮件 | `query` 全文关键词；`filter` 可按 `from`/`to`/`subject`/`folder`/`label`/`has_attachment`/`is_unread`/`create_time` 筛；`page_size` 上限 20 |
+| `feishu__list_messages` | 列某文件夹/标签下的邮件 | **`folder_id` 与 `label_id` 必须给其一**；`page_size` **上限 20**；翻页回传 `page_token`；只看未读用 `only_unread: true`。**没有时间过滤、不能反向排序** —— 按时间找邮件一律改用 `search_messages` |
+| `feishu__search_messages` | 按关键词/条件搜邮件 | `query` 全文关键词；`filter` 可按 `from`/`to`/`subject`/`folder`/`label`/`has_attachment`/`is_unread`/`create_time` 筛；**`page_size` 上限 15**(与 list 的 20 不同)；`create_time` 用 **ISO 8601**(`"2026-05-01T00:00:00Z"`)；**结果恒时间倒序、无排序参数** |
 | `feishu__get_message` | 读单封全文 | `message_id` |
 | `feishu__get_messages` | **批量**读详情 | `message_ids` 数组 + `format`：`metadata`(只头部，最省) / `plain_text_full`(默认，纯文本正文) / `full`(含 html) |
 | `feishu__get_attachment_links` | 取附件下载直链 | `message_id` + `attachment_ids`（来自 `get_message` 的附件列表）。⚠️ 链接**只能用两次、2 小时失效** |
@@ -22,7 +22,7 @@ description: 读写当前用户的飞书邮箱。当用户要求查看/总结/�
 | `feishu__list_contacts` | 列邮箱联系人 | `page_size` 上限 20 |
 | `feishu__list_rules` | 列收信规则 | 无参数 |
 | `feishu__send_message` | 发新邮件 | `to`(数组) + `subject` + `body_plain_text`；见下「发信规矩」 |
-| `feishu__reply_message` | 回复某封 | `message_id` + `body_plain_text`；`reply_all` 可选；引用块自动附加 |
+| `feishu__reply_message` | 回复某封 | `message_id` + `body_plain_text`；`reply_all` 可选；引用块自动附加。若报「取不到原邮件的发件人地址」，**不是这封不能回复** —— 用 `search_messages` 取 `meta_data.from.mail_address` 当 `to` 传进来 |
 | `feishu__forward_message` | 转发某封 | `message_id` + `to`；**不带原附件** |
 
 ## 怎么高效干活（省调用、省 token）
@@ -34,6 +34,9 @@ description: 读写当前用户的飞书邮箱。当用户要求查看/总结/�
 3. **总结一批邮件 → 先 `get_messages({message_ids, format:"metadata"})` 扫一遍，锁定要细看的几封再用 `plain_text_full`。**
 4. **正文优先 `plain_text_full`**，`full` 的 html 又长又难读，除非用户明确要 html。
 5. 翻页要翻到 `page_token` 为空或够用为止，别默认第一页就是全部。
+6. **按时间找邮件（某月份 / 最早的一封）→ 用 `search_messages` 的 `filter.create_time` 开窗，不要用 `list_messages` 一页页翻。**
+   搜索结果恒按时间倒序且**没有升序选项**，所以找「最早」要靠开窗二分：先给一个宽窗（如整年），有结果就把窗口往早的一半收，直到窗内只剩最早那几封。
+7. **时间口径**：`search_messages` 返回 `create_time` 是 ISO 8601；`list/get/get_messages` 原生只有 `internal_date`（epoch 毫秒字符串），本插件已额外补了同值的 `create_time`（ISO），跨工具比对时间就用 `create_time`。
 
 ## 附件
 
