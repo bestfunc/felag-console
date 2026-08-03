@@ -270,6 +270,37 @@ export async function listMessages({ folder_id, label_id, page_token, page_size 
   return await mailGet(`/messages?${q.toString()}`, token);
 }
 
+// 飞书**读**接口返回的 body_plain_text / body_html 是 **base64url** 编码的(注意不是标准
+// base64:`+/` 被换成 `-_`),飞书自己不解。曾因此把密文当明文用 —— get_message 把 base64
+// 原样喂给模型(靠模型自己解,烧 token 且不可靠),更糟的是 quoteBlock 把它拼进转发/回复正文,
+// **收件人直接收到一大段 base64**。
+// 反向的 send 则收**明文**(已发送箱里我方邮件解码后是正常中文,证明飞书自己会编码存),
+// 所以只解不编。
+function decodeMailBody(s) {
+  if (typeof s !== "string" || s.length < 8) return s;
+  const t = s.replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/\-_]+={0,2}$/.test(t)) return s;   // 含别的字符 = 本来就是明文
+  try {
+    const buf = Buffer.from(t, "base64url");
+    if (!buf.length) return s;
+    const txt = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    // 解出乱码控制字符 = 误判(某些短明文碰巧是合法 base64),退回原文。
+    if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(txt)) return s;
+    return txt;
+  } catch {
+    return s;                                            // 非法 base64 / 非 UTF-8 → 原样
+  }
+}
+
+function withDecodedBody(m) {
+  if (!m || typeof m !== "object") return m;
+  const out = { ...m };
+  for (const k of ["body_plain_text", "body_html"]) {
+    if (out[k]) out[k] = decodeMailBody(out[k]);
+  }
+  return out;
+}
+
 // 时间口径统一。飞书两条路径给两种格式:list/get/batch_get 给 `internal_date`(epoch 毫秒
 // 字符串),search 给 `meta_data.create_time`(ISO 8601)。两者无法直接比对,故凡是带
 // internal_date 的返回都**补**一个 ISO 的 `create_time`(不动原字段,保持向后兼容)。
@@ -296,7 +327,7 @@ function withReplyable(m) {
 export async function getMessage({ message_id }) {
   const token = await getAccessToken();
   const d = await mailGet(`/messages/${encodeURIComponent(message_id)}`, token);
-  if (d?.message) d.message = withReplyable(withIsoTime(d.message));
+  if (d?.message) d.message = withReplyable(withIsoTime(withDecodedBody(d.message)));
   return d;
 }
 
@@ -308,7 +339,9 @@ export async function getMessages({ message_ids, format = "plain_text_full" }) {
     method: "POST",
     body: { message_ids, format },
   });
-  if (Array.isArray(d?.messages)) d.messages = d.messages.map((m) => withReplyable(withIsoTime(m)));
+  if (Array.isArray(d?.messages)) {
+    d.messages = d.messages.map((m) => withReplyable(withIsoTime(withDecodedBody(m))));
+  }
   return d;
 }
 

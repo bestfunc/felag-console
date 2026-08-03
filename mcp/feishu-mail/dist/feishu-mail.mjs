@@ -31186,6 +31186,28 @@ async function listMessages({ folder_id, label_id, page_token, page_size = 20, o
   q.set("page_size", String(Math.min(page_size || 20, 20)));
   return await mailGet(`/messages?${q.toString()}`, token);
 }
+function decodeMailBody(s) {
+  if (typeof s !== "string" || s.length < 8) return s;
+  const t = s.replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/\-_]+={0,2}$/.test(t)) return s;
+  try {
+    const buf = Buffer.from(t, "base64url");
+    if (!buf.length) return s;
+    const txt = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(txt)) return s;
+    return txt;
+  } catch {
+    return s;
+  }
+}
+function withDecodedBody(m) {
+  if (!m || typeof m !== "object") return m;
+  const out = { ...m };
+  for (const k of ["body_plain_text", "body_html"]) {
+    if (out[k]) out[k] = decodeMailBody(out[k]);
+  }
+  return out;
+}
 function withIsoTime(m) {
   if (!m || typeof m !== "object" || m.create_time || !m.internal_date) return m;
   const ms = Number(m.internal_date);
@@ -31204,7 +31226,7 @@ function withReplyable(m) {
 async function getMessage({ message_id }) {
   const token = await getAccessToken();
   const d = await mailGet(`/messages/${encodeURIComponent(message_id)}`, token);
-  if (d?.message) d.message = withReplyable(withIsoTime(d.message));
+  if (d?.message) d.message = withReplyable(withIsoTime(withDecodedBody(d.message)));
   return d;
 }
 async function getMessages({ message_ids, format = "plain_text_full" }) {
@@ -31213,7 +31235,9 @@ async function getMessages({ message_ids, format = "plain_text_full" }) {
     method: "POST",
     body: { message_ids, format }
   });
-  if (Array.isArray(d?.messages)) d.messages = d.messages.map((m) => withReplyable(withIsoTime(m)));
+  if (Array.isArray(d?.messages)) {
+    d.messages = d.messages.map((m) => withReplyable(withIsoTime(withDecodedBody(m))));
+  }
   return d;
 }
 var SEARCH_PAGE_MAX = 15;

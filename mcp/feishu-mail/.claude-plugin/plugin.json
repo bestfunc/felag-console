@@ -1,6 +1,6 @@
 {
   "name": "feishu-mail",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "飞书官方邮件插件 —— 用户登录飞书后，数字员工可读写其飞书邮箱：查/搜/读邮件与附件链接、标已读打标签、发送/回复/转发。",
   "mcpServers": {
     "feishu": {
