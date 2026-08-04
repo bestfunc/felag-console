@@ -31054,13 +31054,13 @@ async function refresh(tok) {
   });
   const j = await resp.json();
   if (!resp.ok || j.code) throw new Error(`refresh \u5931\u8D25: ${JSON.stringify(j)}`);
-  return normalizeToken(j);
+  return normalizeToken(j, tok);
 }
-function normalizeToken(j) {
+function normalizeToken(j, prev) {
   const now = Math.floor(Date.now() / 1e3);
   return {
     access_token: j.access_token,
-    refresh_token: j.refresh_token,
+    refresh_token: j.refresh_token || prev?.refresh_token,
     expires_at: now + (j.expires_in || 7200) - 120
     // 提前 2 分钟视为过期
   };
@@ -31078,6 +31078,10 @@ async function getAccessToken() {
     await writeToken(fresh);
     return fresh.access_token;
   } catch (e) {
+    const cur = await readToken();
+    if (cur?.access_token && cur.access_token !== tok.access_token && cur.expires_at > now) {
+      return cur.access_token;
+    }
     throw new AuthError("\u98DE\u4E66\u767B\u5F55\u5DF2\u8FC7\u671F\u4E14\u5237\u65B0\u5931\u8D25\uFF0C\u9700\u91CD\u65B0\u767B\u5F55\uFF1A" + e.message);
   }
 }
@@ -31404,8 +31408,13 @@ async function forwardMessage({ message_id, to, cc, body_plain_text = "" }) {
 async function status() {
   const tok = await readToken();
   if (!tok || !tok.access_token) return { loggedIn: false };
-  const now = Math.floor(Date.now() / 1e3);
-  return { loggedIn: true, expired: !(tok.expires_at > now), expires_at: tok.expires_at };
+  try {
+    await getAccessToken();
+    const cur = await readToken();
+    return { loggedIn: true, expired: false, expires_at: cur?.expires_at ?? tok.expires_at };
+  } catch {
+    return { loggedIn: true, expired: true, expires_at: tok.expires_at };
+  }
 }
 
 // index.mjs

@@ -125,15 +125,18 @@ async function refresh(tok) {
   });
   const j = await resp.json();
   if (!resp.ok || j.code) throw new Error(`refresh 失败: ${JSON.stringify(j)}`);
-  return normalizeToken(j);
+  return normalizeToken(j, tok);
 }
 
-function normalizeToken(j) {
+function normalizeToken(j, prev) {
   // 飞书 v2 返回 access_token/refresh_token/expires_in(秒)。
+  // ⚠️ 刷新响应**万一**不回 refresh_token 就沿用旧的 —— 否则这里会写进 undefined,
+  //    refresh_token 被永久抹掉,之后每次都得重新登录。(felag-client 的 http 连接器
+  //    与 internal/auth 都有这条兜底,本插件原先漏了。)
   const now = Math.floor(Date.now() / 1000);
   return {
     access_token: j.access_token,
-    refresh_token: j.refresh_token,
+    refresh_token: j.refresh_token || prev?.refresh_token,
     expires_at: now + (j.expires_in || 7200) - 120, // 提前 2 分钟视为过期
   };
 }
@@ -152,6 +155,14 @@ export async function getAccessToken() {
     await writeToken(fresh);
     return fresh.access_token;
   } catch (e) {
+    // ⚠️ 飞书的 refresh_token 是**一次性**的(用过即 revoke,响应里换发新的)。client 会同时
+    // 跑 MCP serve 进程和 status 探针进程,两者可能几乎同时刷新 —— 必有一个拿到
+    // `invalid_grant / has been revoked`。这不代表用户要重新登录:对方多半已经刷成功并
+    // 落盘了。故失败后重读一次文件,发现已被换新就直接用。
+    const cur = await readToken();
+    if (cur?.access_token && cur.access_token !== tok.access_token && cur.expires_at > now) {
+      return cur.access_token;
+    }
     throw new AuthError("飞书登录已过期且刷新失败，需重新登录：" + e.message);
   }
 }
@@ -535,9 +546,19 @@ export async function forwardMessage({ message_id, to, cc, body_plain_text = "" 
   });
 }
 
+// client 的 probeLoggedIn 判定是 `loggedIn && !expired` —— 所以 expired 的语义必须是
+// **"真的需要用户重新登录"**,而不是"access_token 到点了"。原先按后者报,导致明明手里有
+// refresh_token、刷一下就能用,client 却每 2 小时就判为登录失效催用户重登。
+// 现在直接走 getAccessToken:未过期是纯本地判断(无网络开销),过期则顺手静默刷新并落盘,
+// 只有连 refresh 都失败(refresh_token 也过期/被吊销)才报 expired。
 export async function status() {
   const tok = await readToken();
   if (!tok || !tok.access_token) return { loggedIn: false };
-  const now = Math.floor(Date.now() / 1000);
-  return { loggedIn: true, expired: !(tok.expires_at > now), expires_at: tok.expires_at };
+  try {
+    await getAccessToken();
+    const cur = await readToken();
+    return { loggedIn: true, expired: false, expires_at: cur?.expires_at ?? tok.expires_at };
+  } catch {
+    return { loggedIn: true, expired: true, expires_at: tok.expires_at };
+  }
 }
