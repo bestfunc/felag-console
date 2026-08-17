@@ -21,7 +21,8 @@ def _require_superadmin(actor):
 
 
 def _conn_cfg(conn):
-    return store.get_config(conn, "felag_server_base"), store.get_config(conn, "felag_model_admin_token")
+    """连接参数:地址三级兜底、令牌由 felag-server 自举写库(见 store)。运维零配置。"""
+    return store.resolve_server_base(conn), store.resolve_token(conn)
 
 
 def _key_state(api_key: str) -> str:
@@ -38,10 +39,14 @@ def handle_model_list(params, conn, provider, actor) -> dict:
     _require_superadmin(actor)
     base, token = _conn_cfg(conn)
     cfg = store.config_view(conn)
-    if not base or not token:
-        # 未配置连接不是错误,是首次使用的正常状态:UI 据此引导去填「连接配置」。
+    cfg["resolved_server_base"] = base  # 让 UI 能显示"实际在连哪",排障时不用猜
+    if not token:
+        # 令牌本该由 felag-server 自举写库,取不到 = 它还没跑到这一步,而不是运维漏配了。
+        # 给出可执行的诊断,而不是让人去填一个他不该知道的值。
         return {"models": [], "config": cfg, "configured": False,
-                "hint": "尚未配置 felag-server 连接,请先在「连接配置」中填写地址与服务令牌"}
+                "hint": "服务令牌尚未就绪。它由 felag-server 自动写入本插件的配置表 —— "
+                        "请确认 felag-server 已升级到 v0.0.27+ 且能连上平台库;"
+                        "本插件刚装好时,等它下一轮自举(约 30 秒)后刷新即可。"}
     try:
         models = server.list_models(base, token)
     except server.ServerError as e:

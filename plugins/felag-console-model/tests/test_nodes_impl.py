@@ -39,6 +39,12 @@ def patch_store(monkeypatch):
     monkeypatch.setattr(nodes_impl.store, "add_audit",
                         lambda conn, actor, action, target, detail: conn.audits.append(
                             {"actor": actor, "action": action, "target": target, "detail": detail}))
+    # 连接参数解析(地址三级兜底 / 令牌自举)的真实实现要碰 DB,这里按语义打桩;
+    # 兜底顺序本身由 test_store_resolve.py 单独覆盖。
+    monkeypatch.setattr(nodes_impl.store, "resolve_server_base",
+                        lambda conn: conn.cfg.get("felag_server_base") or "http://felag-server:28080")
+    monkeypatch.setattr(nodes_impl.store, "resolve_token",
+                        lambda conn: conn.cfg.get("felag_model_admin_token", ""))
 
 
 def _configured_conn():
@@ -66,11 +72,16 @@ def test_non_superadmin_rejected(handler, params):
 
 # ── 列表 ──────────────────────────────────────────────────────────────
 
-def test_list_without_config_returns_hint_not_error():
-    """首次使用(未配连接)不是错误,是引导态 —— 报错会让人以为坏了。"""
+def test_list_without_token_returns_hint_not_error():
+    """令牌未就绪(felag-server 还没自举出来)不是错误,是等待态 —— 报错会让人以为坏了。
+    注意判定只看令牌:地址永远有兜底值,不会为空。"""
     provider, actor = _actor()
     out = nodes_impl.handle_model_list({}, FakeConn(), provider, actor)
     assert out["configured"] is False and out["models"] == [] and out["hint"]
+    # 诊断信息要指向 felag-server,而不是让运维去填一个他不该知道的值
+    assert "felag-server" in out["hint"]
+    # 即使未就绪,也要告诉用户"打算连哪",排障时不用猜
+    assert out["config"]["resolved_server_base"]
 
 
 def test_list_passes_through_server_view(monkeypatch):

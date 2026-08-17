@@ -13,11 +13,43 @@ CONFIG_KEYS = ("felag_server_base", "felag_model_admin_token")
 SECRET_KEYS = ("felag_model_admin_token",)
 
 
+# felag-server 地址的默认值:与它同在 daily-report_dr-net 网络,容器名固定。
+# 三级兜底的最后一级 —— 走到这里说明谁都没配过,而这个值在标准部署里就是对的。
+DEFAULT_SERVER_BASE = "http://felag-server:28080"
+
+
 def get_config(conn, k: str) -> str:
     with conn.cursor() as cur:
         cur.execute(f"SELECT v FROM {P}config WHERE k=%s", (k,))
         r = cur.fetchone()
         return r[0] if r else ""
+
+
+def resolve_server_base(conn) -> str:
+    """felag-server 地址三级兜底,正常情况下运维一个字都不用填:
+      ① 本插件 config(有人显式配过就听他的)
+      ② plg_felagapp_config.felag_server_base —— 客户端版本管理插件配过的同一个 felag-server
+      ③ DEFAULT_SERVER_BASE 容器名默认值
+    """
+    if v := get_config(conn, "felag_server_base"):
+        return v
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT v FROM plg_felagapp_config WHERE k='felag_server_base'")
+            r = cur.fetchone()
+            if r and r[0]:
+                return r[0]
+    except Exception:
+        # 那个插件没装 → 表不存在(42P01)。这是正常情况,不是错误;
+        # 但异常已让本事务进入 aborted 状态,必须回滚才能继续用这个连接。
+        conn.rollback()
+    return DEFAULT_SERVER_BASE
+
+
+def resolve_token(conn) -> str:
+    """服务令牌:由 felag-server 自举写入本表(见其 platform.EnsureModelAdminToken)。
+    运维不用填 —— 取不到通常意味着 felag-server 还没跑到、或版本太老。"""
+    return get_config(conn, "felag_model_admin_token")
 
 
 def set_config(conn, k: str, v: str) -> None:

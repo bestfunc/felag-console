@@ -17,8 +17,9 @@ const I18N = {
     eyebrow: "MODELS · 模型与密钥",
     lead: "数字员工可用的 LLM 模型在这里维护。上游密钥只经 felag-server 透传给网关保存，" +
       "不落本平台数据库、也不会回显——列表只显示“已配置 / 未配置”。",
-    notConfigured: "尚未连接 felag-server",
-    notConfiguredSub: "先填写 felag-server 地址与共享服务令牌，才能读写网关上的模型。",
+    notConfigured: "服务令牌尚未就绪",
+    advanced: "手动配置（高级）",
+    connectedTo: (u: string) => `当前连接 ${u}`,
     thModel: "模型名", thUpstream: "上游", thBase: "上游地址", thKey: "密钥", thSource: "来源", thOps: "操作",
     keyOk: "已配置", keyNo: "未配置", keyRef: (r: string) => `环境变量 ${r}`,
     srcDb: "本页面注册", srcYaml: "配置文件",
@@ -47,8 +48,9 @@ const I18N = {
     eyebrow: "MODELS · KEYS",
     lead: "Maintain the LLM models available to digital employees. Upstream keys are passed through " +
       "felag-server to the gateway and stored there — never in this platform's database, and never read back.",
-    notConfigured: "Not connected to felag-server",
-    notConfiguredSub: "Set the felag-server address and shared service token before managing models.",
+    notConfigured: "Service token not ready yet",
+    advanced: "Manual setup (advanced)",
+    connectedTo: (u: string) => `Connected to ${u}`,
     thModel: "Model", thUpstream: "Upstream", thBase: "API base", thKey: "Key", thSource: "Source", thOps: "Actions",
     keyOk: "Configured", keyNo: "Not set", keyRef: (r: string) => `env ${r}`,
     srcDb: "Added here", srcYaml: "Config file",
@@ -111,7 +113,7 @@ interface ModelRow {
 }
 interface ListResp {
   models: ModelRow[];
-  config: { felag_server_base?: string; felag_model_admin_token?: boolean };
+  config: { felag_server_base?: string; felag_model_admin_token?: boolean; resolved_server_base?: string };
   configured: boolean;
   hint?: string;
 }
@@ -239,22 +241,35 @@ export default function ModelManager() {
           <Button style={btnGhost} onClick={load} disabled={loading}>
             <RefreshCw size={15} style={{ marginRight: 6 }} />{t.refresh}
           </Button>
-          <Button style={btnGhost} onClick={() => setConnOpen(true)}>
-            {t.connBtn}
-          </Button>
           <Button style={btnPrimary} onClick={() => openAdd()} disabled={!data?.configured}>
             <Plus size={15} style={{ marginRight: 6 }} />{t.addBtn}
           </Button>
         </div>
       </div>
 
+      {/* 连接是自动的:地址三级兜底、令牌由 felag-server 自举写库。
+          正常情况下这里只是一行状态;出问题时才给诊断 + 手动兜底入口。 */}
+      {data?.configured && data.config?.resolved_server_base && (
+        <div style={{ fontSize: 12, color: C.muted, fontFamily: FMONO, marginBottom: 14 }}>
+          {t.connectedTo(data.config.resolved_server_base)}
+        </div>
+      )}
+
       {data && !data.configured ? (
         <div style={{ ...cardStyle, padding: "44px 28px", textAlign: "center" }}>
           <div style={{ fontSize: 17, fontWeight: 800, color: C.ink, marginBottom: 8 }}>{t.notConfigured}</div>
-          <div style={{ fontSize: 13.5, color: C.muted, marginBottom: 20 }}>{t.notConfiguredSub}</div>
-          <Button style={btnPrimary} onClick={() => setConnOpen(true)}>
-            {t.connBtn}
-          </Button>
+          <div style={{ fontSize: 13.5, color: C.muted, marginBottom: 18, lineHeight: 1.8, maxWidth: 620, margin: "0 auto 18px" }}>
+            {data.hint}
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <Button style={btnGhost} onClick={load} disabled={loading}>
+              <RefreshCw size={15} style={{ marginRight: 6 }} />{t.refresh}
+            </Button>
+            {/* 兜底出口:自举本该覆盖所有正常情况,但真出问题时得有手动路径,不能死在这儿 */}
+            <Button style={{ ...btnGhost, color: C.muted, fontWeight: 400 }} onClick={() => setConnOpen(true)}>
+              {t.advanced}
+            </Button>
+          </div>
         </div>
       ) : models.length === 0 ? (
         <div style={{ ...cardStyle, padding: "44px 28px", textAlign: "center" }}>
