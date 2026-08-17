@@ -4,7 +4,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 NODES = ["actor_context", "plugin_source_list", "plugin_source_create",
          "plugin_source_review", "plugin_source_delete", "plugin_source_sync",
          "plugin_source_rename", "plugin_discover", "audit_list",
-         "official_list", "official_enable", "official_disable", "official_set_creds"]
+         "official_list", "official_enable", "official_disable", "official_set_creds",
+         "vision_model_list", "vision_model_set"]
 
 def test_all_nodes_declared_in_repo():
     repo = yaml.safe_load((ROOT / "tinia-repo.yaml").read_text(encoding="utf-8"))

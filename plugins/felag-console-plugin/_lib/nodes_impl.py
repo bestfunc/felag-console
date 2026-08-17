@@ -2,7 +2,7 @@
 (params, conn, provider, actor)，写操作在本函数内落 audit 并 commit
 （store 层不 commit，节点层收口事务）。"""
 import psycopg2
-from _lib import store, discover, db, official_catalog
+from _lib import store, discover, db, official_catalog, vision
 
 class NodeError(Exception):
     pass
@@ -167,9 +167,41 @@ def handle_official_list(params, conn, provider, actor) -> dict:
             "display_name_en": p.get("display_name_en", ""), "description": p.get("description", ""),
             "cred_keys": p.get("cred_keys", []), "creds_configured": creds_ok,
             "cred_values": cred_values,
+            "config_ui": p.get("config_ui", "creds"),
             "enabled_scopes": sorted(enabled),
         })
     return {"plugins": out}
+
+
+def handle_vision_model_list(params, conn, provider, actor) -> dict:
+    """列可用于识图的模型 + 当前选中的那个(经 felag-server /vision/models)。
+
+    只读,但仍限超管:模型清单会暴露网关上都挂了哪些上游,不该给普通管理员。
+    取不到不抛异常 —— felag-server 没升级/没起来时,界面要能显示原因而不是整页报错。"""
+    if not getattr(actor, "is_superadmin", False):
+        raise NodeError("仅超管可查看识图模型")
+    try:
+        out = vision.list_models(conn)
+    except vision.VisionError as e:
+        return {"models": [], "current": "", "available": False, "hint": str(e)}
+    return {"models": out.get("models", []), "current": out.get("current", ""), "available": True}
+
+
+def handle_vision_model_set(params, conn, provider, actor) -> dict:
+    """选定识图模型 —— 写的是 role_vision,与「模型与密钥」页的「图片识别」同一个值。"""
+    if not getattr(actor, "is_superadmin", False):
+        raise NodeError("仅超管可设置识图模型")
+    model_name = (params.get("model_name") or "").strip()
+    if not model_name:
+        raise NodeError("请选择模型")
+    try:
+        vision.set_model(conn, model_name)
+    except vision.VisionError as e:
+        raise NodeError(str(e)) from e
+    store.add_audit(conn, actor.user_id, "*", "official.set_vision_model",
+                    "official:felag-vision", {"model": model_name})
+    conn.commit()
+    return {"ok": True, "model_name": model_name}
 
 
 def _official_or_raise(plugin_key):

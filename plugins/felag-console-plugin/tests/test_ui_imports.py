@@ -35,3 +35,20 @@ def test_ui_named_exports_within_platform_whitelist():
     platform_ui = _named_imports(tsx, "@platform/ui")
     assert lucide <= proven_lucide, f"lucide 未验图标(平台可能不 re-export): {lucide - proven_lucide}"
     assert platform_ui <= proven_platform_ui, f"@platform/ui 未验组件: {platform_ui - proven_platform_ui}"
+
+def test_every_used_component_is_imported():
+    """🔴 用了但没导入 = 运行时 ReferenceError,整页白屏。
+    上面那条只管"导入的是否合法",管不住"用了却没导入" —— 同仓 felag-console-model
+    就是漏导 `Select` 白过一次屏(v0.1.3)。同一份文件同一个坑,这里一并兜住。"""
+    tsx = _UI.read_text(encoding="utf-8")
+    imported = _named_imports(tsx, "@platform/ui") | _named_imports(tsx, "lucide-react")
+    used = set(re.findall(r"<([A-Z][A-Za-z0-9]*)[\s/>]", tsx))
+    # 本文件自定义的组件(function 声明 / const 箭头函数)与 React 自身
+    local = set(re.findall(r"function\s+([A-Z][A-Za-z0-9]*)", tsx))
+    local |= set(re.findall(r"const\s+([A-Z][A-Za-z0-9]*)\s*[:=]", tsx))
+    local |= {"React"}
+    # 排除 TS 泛型实参:callNode<ListResp>(...) 长得和 JSX 标签一样
+    type_names = set(re.findall(r"(?:interface|type)\s+([A-Z][A-Za-z0-9]*)", tsx))
+    single_letter = {n for n in used if len(n) == 1}
+    missing = used - imported - local - type_names - single_letter
+    assert not missing, f"这些组件用了却没导入(会运行时报 X is not defined): {sorted(missing)}"

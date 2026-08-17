@@ -50,6 +50,15 @@ const I18N = {
     needCredsFirst: "请先配置应用凭据再启用", noEnabledScopes: "尚未在任何作用域启用",
     pickScopeEnable: "选择作用域后启用",
     enabledMark: "已启用", credConfiguredHint: "已配置，留空表示不修改", statusNotEnabled: "未启用",
+    setVisionModel: "识图模型", visionDialogTitle: "选择识图模型",
+    visionUsing: (m: string) => `识图用 ${m}`, visionUnset: "未选识图模型",
+    visionModelLabel: "用哪个模型看图", visionPick: "请选择",
+    visionHint: "数字员工看图看视频时调用的模型。选中的即「模型与密钥」页的「图片识别」——" +
+      "两处是同一个设置，改一处两处都变。上游密钥留在网关，不下发到客户端。",
+    visionNoModels: "网关上还没有模型，请先到「模型与密钥」页注册",
+    visionUnavailable: "暂时取不到模型清单（felag-server 不可达或版本过老）",
+    visionTokenPending: "服务令牌尚未就绪，由 felag-server 自动写入（约 30 秒后刷新即可）",
+    visionSaved: (m: string) => `识图模型已设为 ${m}`,
     scopeTreeTitle: "在哪些范围启用",
     scopeTreeHint: "勾选即生效，取消勾选即停用（约 30 秒内下发到客户端）",
     applying: "生效中…",
@@ -95,6 +104,16 @@ const I18N = {
     needCredsFirst: "Configure credentials before enabling", noEnabledScopes: "Not enabled in any scope",
     pickScopeEnable: "Pick a scope then enable",
     enabledMark: "Enabled", credConfiguredHint: "Configured; leave blank to keep unchanged", statusNotEnabled: "Not enabled",
+    setVisionModel: "Vision model", visionDialogTitle: "Choose the vision model",
+    visionUsing: (m: string) => `vision: ${m}`, visionUnset: "No vision model",
+    visionModelLabel: "Model used to read images", visionPick: "Select",
+    visionHint: "The model digital employees call to read images and video. This is the same setting as " +
+      "“Image understanding” on the Models & Keys page — change either and both follow. " +
+      "The upstream key stays on the gateway.",
+    visionNoModels: "No models on the gateway yet — register one on the Models & Keys page first",
+    visionUnavailable: "Model list unavailable (felag-server unreachable or too old)",
+    visionTokenPending: "Service token not ready yet; felag-server writes it automatically (refresh in ~30s)",
+    visionSaved: (m: string) => `Vision model set to ${m}`,
     scopeTreeTitle: "Enable for",
     scopeTreeHint: "Tick to enable, untick to disable (reaches clients within ~30s)",
     applying: "applying…",
@@ -172,6 +191,13 @@ type OfficialPlugin = {
   key: string; plugin: string; display_name: string; display_name_en: string; description: string;
   cred_keys: string[]; creds_configured: boolean; enabled_scopes: string[];
   cred_values?: Record<string, string>; // 非机密凭据回显(app_id 一类)供编辑预填;机密键(secret)后端不回
+  /** 这颗"配置"按钮该弹什么:creds=应用凭据表单 / vision_model=识图模型下拉 / none=不显示 */
+  config_ui?: "creds" | "vision_model" | "none";
+}
+/** 识图可用模型 + 当前选中。current 写的就是 role_vision,与「模型与密钥」页的
+ *  「图片识别」是同一个值 —— 这里不是第二个真相源,只是同一状态摆在管理员当下这一页。 */
+interface VisionModels {
+  models: string[]; current: string; available: boolean; hint?: string;
 };
 type Source = {
   id: number; git_url: string; plugin: string; display_name?: string | null; scope_ref: string; branch: string; status: string;
@@ -349,6 +375,11 @@ export default function PluginSourceManager() {
   const [credEditing, setCredEditing] = useState<OfficialPlugin | null>(null);
   const [credForm, setCredForm] = useState({ lark_app_id: "", lark_app_secret: "" });
   const [credBusy, setCredBusy] = useState(false);
+  // 识图模型选择(config_ui==="vision_model" 的插件用这套,不是飞书那张凭据表单)
+  const [visionEditing, setVisionEditing] = useState<OfficialPlugin | null>(null);
+  const [vision, setVision] = useState<VisionModels>({ models: [], current: "", available: false });
+  const [visionPick, setVisionPick] = useState("");
+  const [visionBusy, setVisionBusy] = useState(false);
   const [discovered, setDiscovered] = useState<{ name: string; version: string }[]>([]);
   const [branches, setBranches] = useState<string[]>([]);
   const [discovering, setDiscovering] = useState(false);
@@ -361,6 +392,12 @@ export default function PluginSourceManager() {
       setSources(r.sources);
       const o = await callNode<{ plugins: OfficialPlugin[] }>("official_list", {}, t);
       setOfficial(o.plugins);
+      // 识图模型:列表行上要直接看到"现在用哪个",不能等点开弹窗才知道。
+      // 单独 try —— felag-server 没升级/没起来不该把整个插件页拖垮。
+      if (o.plugins.some((p) => p.config_ui === "vision_model")) {
+        try { setVision(await callNode<VisionModels>("vision_model_list", {}, t)); }
+        catch { setVision({ models: [], current: "", available: false }); }
+      }
     } catch (e: any) { toast.error(e.message); }
   }, [t]);
 
@@ -473,6 +510,24 @@ export default function PluginSourceManager() {
     // 预填已配的非机密值(app_id)让管理员"知道老的";机密(secret)留空 = 不修改。
     setCredEditing(p); setCredForm({ lark_app_id: p.cred_values?.lark_app_id || "", lark_app_secret: "" });
   }
+  /** 打开识图模型选择。清单在 refresh 时已取,这里再取一次是为了拿到最新
+   *  ——「模型与密钥」页刚加的模型,不该要求管理员先刷新本页才能选到。 */
+  async function openVision(p: OfficialPlugin) {
+    setVisionEditing(p); setVisionPick(vision.current);
+    try {
+      const v = await callNode<VisionModels>("vision_model_list", {}, t);
+      setVision(v); setVisionPick(v.current);
+    } catch (e: any) { toast.error(e.message); }
+  }
+  async function saveVision() {
+    if (!visionPick) return;
+    setVisionBusy(true);
+    try {
+      await callNode("vision_model_set", { model_name: visionPick }, t);
+      toast.success(t.visionSaved(visionPick)); setVisionEditing(null); refresh();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setVisionBusy(false); }
+  }
   async function saveCreds() {
     if (!credEditing) return;
     const creds: Record<string, string> = {};
@@ -539,11 +594,25 @@ export default function PluginSourceManager() {
                   <Badge style={on ? pill(C.ok, C.okTint) : pill(C.muted, C.surface2)}>
                     {on ? `${t.enabledMark} · ${p.enabled_scopes.map(scopeName).join("、")}` : t.statusNotEnabled}
                   </Badge>
-                  {!p.creds_configured && <Badge style={pill(C.warnText, C.warnBg)}>{t.credsMissing}</Badge>}
+                  {/* 识图插件的"凭据"是 server 自举的服务令牌,管理员没什么可填 ——
+                      它这一行该显示的是"现在用哪个模型看图",而不是一句他无从下手的"凭据未配"。 */}
+                  {p.config_ui === "vision_model" ? (
+                    vision.current
+                      ? <Badge style={pill(C.signal, C.blueTint)}>{t.visionUsing(vision.current)}</Badge>
+                      : <Badge style={pill(C.warnText, C.warnBg)}>{t.visionUnset}</Badge>
+                  ) : (
+                    !p.creds_configured && <Badge style={pill(C.warnText, C.warnBg)}>{t.credsMissing}</Badge>
+                  )}
                   <div style={{ flex: 1 }} />
-                  <Button variant="outline" style={btnGhost} onClick={(e) => { e.stopPropagation(); openCreds(p); }}>
-                    {t.setCreds}
-                  </Button>
+                  {p.config_ui !== "none" && (
+                    <Button variant="outline" style={btnGhost}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (p.config_ui === "vision_model") openVision(p); else openCreds(p);
+                            }}>
+                      {p.config_ui === "vision_model" ? t.setVisionModel : t.setCreds}
+                    </Button>
+                  )}
                 </div>
 
                 {open && (
@@ -555,7 +624,8 @@ export default function PluginSourceManager() {
                       {t.scopeTreeTitle}
                     </div>
                     <div style={{ fontFamily: FZH, fontSize: 12, color: C.muted, marginBottom: 10 }}>
-                      {p.creds_configured ? t.scopeTreeHint : t.needCredsFirst}
+                      {p.creds_configured ? t.scopeTreeHint
+                        : p.config_ui === "vision_model" ? t.visionTokenPending : t.needCredsFirst}
                     </div>
                     <ScopeCheckTree
                       scopes={scopes}
@@ -761,6 +831,45 @@ export default function PluginSourceManager() {
             <Button variant="outline" style={btnGhost} onClick={() => setCredEditing(null)}>{t.cancel}</Button>
             <Button style={{ ...btnPrimary, opacity: credBusy ? 0.6 : 1 }} disabled={credBusy} onClick={saveCreds}>
               <Check className="size-4 mr-1" />{credBusy ? t.saving : t.save}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 识图模型选择:这个插件唯一要人决定的事。上游密钥在网关(M5)、服务令牌由 server 自举,
+          都轮不到管理员操心 —— 所以这里只有一个下拉,没有第二个字段。 */}
+      <Dialog open={!!visionEditing} onOpenChange={(o) => { if (!o) setVisionEditing(null); }}>
+        <DialogContent style={{ ...dialogStyle, maxWidth: 480 }}>
+          <DialogHeader>
+            <div style={eyebrow(6)}>{t.officialEyebrow}</div>
+            <DialogTitle style={{ fontFamily: FZH, fontWeight: 700, color: C.ink }}>{t.visionDialogTitle}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div style={{ fontFamily: FZH, fontSize: 12.5, color: C.muted, lineHeight: 1.7 }}>{t.visionHint}</div>
+            {vision.available ? (
+              <div>
+                <Label style={labelStyle}>{t.visionModelLabel}</Label>
+                <Select value={visionPick} onValueChange={setVisionPick}>
+                  <SelectTrigger style={inputStyle}><SelectValue placeholder={t.visionPick} /></SelectTrigger>
+                  <SelectContent>
+                    {vision.models.map((m) => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {vision.models.length === 0 && (
+                  <div style={{ fontFamily: FZH, fontSize: 12, color: C.warnText, marginTop: 6 }}>{t.visionNoModels}</div>
+                )}
+              </div>
+            ) : (
+              <div style={{ fontFamily: FZH, fontSize: 12.5, color: C.warnText, lineHeight: 1.7 }}>
+                {vision.hint || t.visionUnavailable}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" style={btnGhost} onClick={() => setVisionEditing(null)}>{t.cancel}</Button>
+            <Button style={{ ...btnPrimary, opacity: visionBusy || !visionPick ? 0.6 : 1 }}
+                    disabled={visionBusy || !visionPick} onClick={saveVision}>
+              <Check className="size-4 mr-1" />{visionBusy ? t.saving : t.save}
             </Button>
           </DialogFooter>
         </DialogContent>

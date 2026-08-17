@@ -1,0 +1,13 @@
+key: vision_model_list
+name: 列识图可用模型
+description: 经 felag-server 列网关上可用于识图的模型 + 当前选中的那个(仅超管)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 模型清单与当前选中项
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

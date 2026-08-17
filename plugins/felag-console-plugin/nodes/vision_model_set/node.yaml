@@ -1,0 +1,13 @@
+key: vision_model_set
+name: 选定识图模型
+description: 设置图片视频识别用哪个模型(写 role_vision，与「模型与密钥」页的「图片识别」同一个值；仅超管)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 设置结果
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt
