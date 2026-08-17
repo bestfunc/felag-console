@@ -1,0 +1,13 @@
+key: model_list
+name: 模型清单
+description: 列网关当前可用的模型与连接配置(密钥一律脱敏,只报配没配);仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 模型清单 + 连接配置视图
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

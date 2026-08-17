@@ -1,0 +1,38 @@
+name: 模型与密钥
+version: 0.1.0
+description: Félag 数字员工可用的 LLM 模型与上游密钥治理（经 felag-server 写网关 LiteLLM，密钥不落平台库）
+group: Félag
+name_i18n:
+  en: Models & Keys
+group_i18n:
+  en: Félag
+sdk:
+  python: ">=3.11"
+table_prefix: plg_felagmodel_
+migrations:
+  - migrations/001_init.up.sql
+required_dbs:
+  - alias: platform_pg
+    description: 平台 PG（daily_report 库，本插件的配置与审计表所在；用超管 dr 凭据 id=121）
+# MCP 能力暴露(§10):只暴露只读的模型清单。
+# upsert/delete/set_config 刻意不暴露 —— 改网关模型与上游密钥直接决定 LLM 账单和可用性,
+# 是高危动作,必须人在 UI 里做,绝不给外部 AI 调用入口(与 felag-app-release 同规矩)。
+mcp:
+  expose:
+    - model_list
+modules:
+  nodes:
+    - model_list
+    - model_upsert
+    - model_delete
+    - model_set_config
+  ui:
+    - name: main
+      kind: tsx
+      path: ui/ModelManager.tsx
+      title: 模型与密钥
+      menu_label: 模型与密钥
+      # ⚠️ 平台只认 41 个图标的白名单,不在表里就是侧栏缺图标(Rocket/Boxes 都栽过)。
+      # Settings 未经本平台实测;若上线后侧栏没图标,换成已验证过的 Send / ListChecks / GitBranch。
+      menu_icon: Settings
+      menu_order: 53

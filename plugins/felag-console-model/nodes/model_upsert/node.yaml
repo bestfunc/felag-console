@@ -1,0 +1,13 @@
+key: model_upsert
+name: 新增/更新模型
+description: 向网关注册或更新一个模型;密钥只透传给网关、不落平台库;仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 写入结果(不含密钥)
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

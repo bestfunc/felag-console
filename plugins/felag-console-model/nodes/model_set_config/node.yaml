@@ -1,0 +1,13 @@
+key: model_set_config
+name: 连接配置
+description: 配置 felag-server 基址与共享服务令牌(值留空=不改动该项);仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 已写入的配置键名(令牌不回显)
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

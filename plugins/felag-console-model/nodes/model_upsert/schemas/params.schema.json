@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "新增/更新模型",
+  "required": [
+    "model_name",
+    "upstream"
+  ],
+  "properties": {
+    "model_name": {
+      "type": "string",
+      "title": "模型名",
+      "description": "客户端发起请求时使用的名字，如 deepseek-v4-pro"
+    },
+    "upstream": {
+      "type": "string",
+      "title": "上游模型",
+      "description": "LiteLLM 的 model 值，形如 deepseek/deepseek-v4-pro、openai/glm-4.6v-flash"
+    },
+    "api_key": {
+      "type": "string",
+      "title": "上游密钥",
+      "description": "留空=不改动已有密钥。可填真实密钥，或 os.environ/XXX 引用网关侧环境变量"
+    },
+    "api_base": {
+      "type": "string",
+      "title": "上游地址",
+      "description": "兼容/自建端点才需要填"
+    }
+  }
+}

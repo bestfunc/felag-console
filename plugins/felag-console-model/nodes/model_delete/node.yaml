@@ -1,0 +1,13 @@
+key: model_delete
+name: 删除模型
+description: 从网关删除一个模型(仅限本页面注册的);仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 删除结果
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt
