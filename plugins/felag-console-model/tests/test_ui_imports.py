@@ -39,6 +39,21 @@ def test_ui_named_exports_within_platform_whitelist():
     assert platform_ui <= proven_platform_ui, f"@platform/ui 未验组件: {platform_ui - proven_platform_ui}"
 
 
+def test_every_used_platform_component_is_imported():
+    """🔴 用了但没导入 = 运行时 ReferenceError,页面整个白屏(Select 就这么栽过一次)。
+    上面那条白名单测试只管"导入的是否合法",管不住"用了却没导入"——补这一条。"""
+    tsx = _UI.read_text(encoding="utf-8")
+    imported = _named_imports(tsx, "@platform/ui") | _named_imports(tsx, "lucide-react")
+    # JSX 里出现的大写开头组件名(排除本文件自定义的与 React 内建)
+    used = set(re.findall(r"<([A-Z][A-Za-z0-9]*)[\s/>]", tsx))
+    local = set(re.findall(r"function\s+([A-Z][A-Za-z0-9]*)", tsx)) | {"React"}
+    # 排除 TS 泛型实参:callNode<ListResp>(...)、Promise<T> 长得和 JSX 标签一样
+    type_names = set(re.findall(r"(?:interface|type)\s+([A-Z][A-Za-z0-9]*)", tsx))
+    single_letter = {n for n in used if len(n) == 1}
+    missing = used - imported - local - type_names - single_letter
+    assert not missing, f"这些组件用了却没导入(会运行时报 X is not defined): {sorted(missing)}"
+
+
 def test_ui_has_no_tailwind_class_reliance_for_brand_tokens():
     """平台 Tailwind 不认插件自带的品牌 token,颜色必须内联 style(DEPLOY.md 约束)。"""
     tsx = _UI.read_text(encoding="utf-8")

@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { Button, Input, Label, Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
   Badge, toast, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
   useCurrentLanguage } from "@platform/ui";
 // ⚠️ 只用已在本平台真机验证过的图标 —— 平台 plugin-sdk 只 re-export lucide 的一个子集,
