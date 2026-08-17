@@ -3,7 +3,8 @@ import yaml
 import json
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-NODES = ["model_list", "model_upsert", "model_delete", "model_set_config"]
+NODES = ["model_list", "model_upsert", "model_delete", "model_set_config",
+         "model_set_role", "model_test"]
 
 
 def _repo():

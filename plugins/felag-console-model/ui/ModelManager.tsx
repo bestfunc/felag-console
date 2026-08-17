@@ -21,6 +21,13 @@ const I18N = {
     advanced: "手动配置（高级）",
     connectedTo: (u: string) => `当前连接 ${u}`,
     thModel: "模型名", thUpstream: "上游", thBase: "上游地址", thKey: "密钥", thSource: "来源", thOps: "操作",
+    inUseEyebrow: "IN USE · 使用中的模型",
+    notChosen: "未选择", pickOne: "请选一个",
+    roleSwitched: (m: string) => `已切换为 ${m}`,
+    test: "测试", testing: "测试中…", usable: "可用", unusable: "不可用",
+    testOk: (m: string) => `${m} 可用`, testFail: (m: string) => `${m} 不可用`,
+    inUseAs: (r: string) => `使用中 · ${r}`,
+    edit: "编辑",
     keyOk: "已配置", keyNo: "未配置", keyRef: (r: string) => `环境变量 ${r}`,
     keyUnknown: "网关未回传",
     keyUnknownTip: "网关对配置文件里定义的模型不返回密钥字段，无法判断是否已配置（不等于没配）",
@@ -54,6 +61,13 @@ const I18N = {
     advanced: "Manual setup (advanced)",
     connectedTo: (u: string) => `Connected to ${u}`,
     thModel: "Model", thUpstream: "Upstream", thBase: "API base", thKey: "Key", thSource: "Source", thOps: "Actions",
+    inUseEyebrow: "IN USE",
+    notChosen: "Not selected", pickOne: "Pick one",
+    roleSwitched: (m: string) => `Switched to ${m}`,
+    test: "Test", testing: "Testing…", usable: "Usable", unusable: "Unusable",
+    testOk: (m: string) => `${m} is usable`, testFail: (m: string) => `${m} is not usable`,
+    inUseAs: (r: string) => `In use · ${r}`,
+    edit: "Edit",
     keyOk: "Configured", keyNo: "Not set", keyRef: (r: string) => `env ${r}`,
     keyUnknown: "Not reported",
     keyUnknownTip: "The gateway does not return the key field for models defined in its config file — this does not mean it is unset",
@@ -118,9 +132,20 @@ interface ModelRow {
 interface ListResp {
   models: ModelRow[];
   config: { felag_server_base?: string; felag_model_admin_token?: boolean; resolved_server_base?: string };
+  /** 各角色当前「使用中」的模型:role_chat=基准对话,role_vision=图片识别 */
+  roles?: Record<string, string>;
   configured: boolean;
   hint?: string;
 }
+
+// 两个角色。分开而不是一个"默认模型":识图模型不擅长工具编排、主力模型看不了图,
+// 能力不重叠,混成一个必然有一边是错的。
+const ROLES = [
+  { key: "role_chat", zh: "基准模型", en: "Base model",
+    zhSub: "数字员工对话与工具编排用的主力模型", enSub: "Drives conversation and tool use" },
+  { key: "role_vision", zh: "图片识别", en: "Image understanding",
+    zhSub: "看图/看视频时使用(识图插件也用它)", enSub: "Used for image & video understanding" },
+];
 
 async function callNode<T>(node: string, params: object, t: Dict): Promise<T> {
   const resp = await fetch(`/api/dag/${SLUG}/${node}`, {
@@ -154,6 +179,8 @@ export default function ModelManager() {
   // 连接配置表单
   const [cBase, setCBase] = useState("");
   const [cToken, setCToken] = useState("");
+  const [testing, setTesting] = useState("");
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; reply?: string; error?: string }>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -198,6 +225,40 @@ export default function ModelManager() {
     }
   }
 
+  // 一键切换某角色的「使用中」模型 —— 选哪个就走哪个。
+  async function setRole(role: string, modelName: string) {
+    if (!modelName) return;
+    setBusy(true);
+    try {
+      await callNode("model_set_role", { role, model_name: modelName }, t);
+      toast.success(t.roleSwitched(modelName));
+      await load();
+    } catch (e: any) {
+      toast.error(String(e.message || e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // 实调一次,回答"这个模型现在能不能用"。网关对任何模型都不回传密钥字段,
+  // 光看配置只能猜 —— 猜错比不显示更糟,所以这里只给实测结果。
+  async function testModel(name: string) {
+    setTesting(name);
+    setTestResult((m) => ({ ...m, [name]: undefined as any }));
+    try {
+      const r = await callNode<{ ok: boolean; reply?: string; error?: string }>(
+        "model_test", { model_name: name }, t);
+      setTestResult((m) => ({ ...m, [name]: r }));
+      if (r.ok) toast.success(t.testOk(name));
+      else toast.error(t.testFail(name));
+    } catch (e: any) {
+      setTestResult((m) => ({ ...m, [name]: { ok: false, error: String(e.message || e) } }));
+      toast.error(String(e.message || e));
+    } finally {
+      setTesting("");
+    }
+  }
+
   async function removeModel(row: ModelRow) {
     if (!row.id) return;
     if (!window.confirm(`${t.del1} ${row.modelName}${t.del2}`)) return;
@@ -232,6 +293,74 @@ export default function ModelManager() {
   }
 
   const models = data?.models || [];
+
+  // 模型清单表。「密钥」列已删除 —— 网关对任何模型都不回传 api_key,那一列只能显示
+  // "我看不见",没有信息量;要知道能不能用请点「测试」实调(见上方角色卡与本表操作列)。
+  const modelTable = (
+    <div style={cardStyle}>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead style={thStyle}>{t.thModel}</TableHead>
+            <TableHead style={thStyle}>{t.thUpstream}</TableHead>
+            <TableHead style={thStyle}>{t.thBase}</TableHead>
+            <TableHead style={thStyle}>{t.thSource}</TableHead>
+            <TableHead style={{ ...thStyle, textAlign: "right" }}>{t.thOps}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {models.map((m) => {
+            const usedBy = ROLES.filter((r) => data?.roles?.[r.key] === m.modelName);
+            const res = testResult[m.modelName];
+            return (
+              <TableRow key={m.id || m.modelName}>
+                <TableCell style={{ fontWeight: 700, color: C.ink }}>
+                  {m.modelName}
+                  {usedBy.map((r) => (
+                    <Badge key={r.key} style={{ ...pill(C.ok, C.okTint), marginLeft: 6 }}>
+                      {t.inUseAs(lang === "en" ? r.en : r.zh)}
+                    </Badge>
+                  ))}
+                </TableCell>
+                <TableCell style={{ fontFamily: FMONO, fontSize: 12.5, color: C.body }}>{m.upstream || "—"}</TableCell>
+                <TableCell style={{ fontFamily: FMONO, fontSize: 12, color: C.muted, wordBreak: "break-all" }}>{m.apiBase || "—"}</TableCell>
+                <TableCell>
+                  <Badge style={pill(m.dbManaged ? C.signal : C.muted, m.dbManaged ? C.blueTint : C.surface2)}>
+                    {m.dbManaged ? t.srcDb : t.srcYaml}
+                  </Badge>
+                </TableCell>
+                <TableCell style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                  {res && (
+                    <Badge style={{ ...(res.ok ? pill(C.ok, C.okTint) : pill(C.ng, C.ngTint)), marginRight: 8 }}
+                           title={res.ok ? res.reply : res.error}>
+                      {res.ok ? t.usable : t.unusable}
+                    </Badge>
+                  )}
+                  <Button style={{ ...btnGhost, marginRight: 8 }} size="sm"
+                          onClick={() => testModel(m.modelName)} disabled={!!testing}>
+                    {testing === m.modelName ? t.testing : t.test}
+                  </Button>
+                  {m.dbManaged ? (
+                    <>
+                      <Button style={{ ...btnGhost, marginRight: 8 }} size="sm" onClick={() => openAdd(m)} disabled={busy}>
+                        {t.edit}
+                      </Button>
+                      <Button style={{ ...btnGhost, color: C.ng, borderColor: `${C.ng}55` }} size="sm"
+                              onClick={() => removeModel(m)} disabled={busy}>
+                        <Trash2 size={14} style={{ marginRight: 4 }} />{t.delete}
+                      </Button>
+                    </>
+                  ) : (
+                    <span style={{ fontSize: 12, color: C.muted }}>{t.yamlHint}</span>
+                  )}
+                </TableCell>
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
+  );
 
   return (
     <div style={{ background: AURORA, minHeight: "100%", padding: "28px 32px 48px", fontFamily: FZH }}>
@@ -281,60 +410,53 @@ export default function ModelManager() {
           <div style={{ fontSize: 13.5, color: C.muted }}>{t.emptySub}</div>
         </div>
       ) : (
-        <div style={cardStyle}>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead style={thStyle}>{t.thModel}</TableHead>
-                <TableHead style={thStyle}>{t.thUpstream}</TableHead>
-                <TableHead style={thStyle}>{t.thBase}</TableHead>
-                <TableHead style={thStyle}>{t.thKey}</TableHead>
-                <TableHead style={thStyle}>{t.thSource}</TableHead>
-                <TableHead style={{ ...thStyle, textAlign: "right" }}>{t.thOps}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {models.map((m) => (
-                <TableRow key={m.id || m.modelName}>
-                  <TableCell style={{ fontWeight: 700, color: C.ink }}>{m.modelName}</TableCell>
-                  <TableCell style={{ fontFamily: FMONO, fontSize: 12.5, color: C.body }}>{m.upstream || "—"}</TableCell>
-                  <TableCell style={{ fontFamily: FMONO, fontSize: 12, color: C.muted, wordBreak: "break-all" }}>{m.apiBase || "—"}</TableCell>
-                  <TableCell>
-                    {/* unknown 必须区别于 empty:网关对 yaml 定义的模型不回传 api_key 字段,
-                        把"看不见"显示成"未配置"是假信息(deepseek 就是这么被误报的)。 */}
-                    {m.keyState === "env"
-                      ? <Badge style={pill(C.ok, C.okTint)}>{t.keyRef(m.keyRef || "")}</Badge>
-                      : m.keyState === "configured"
-                      ? <Badge style={pill(C.ok, C.okTint)}>{t.keyOk}</Badge>
-                      : m.keyState === "empty"
-                      ? <Badge style={pill(C.warn, C.warnTint)}>{t.keyNo}</Badge>
-                      : <Badge style={pill(C.muted, C.surface2)} title={t.keyUnknownTip}>{t.keyUnknown}</Badge>}
-                  </TableCell>
-                  <TableCell>
-                    <Badge style={pill(m.dbManaged ? C.signal : C.muted, m.dbManaged ? C.blueTint : C.surface2)}>
-                      {m.dbManaged ? t.srcDb : t.srcYaml}
+        <>
+        {/* 使用中的模型:基准 / 识图 分开选,选哪个就走哪个 */}
+        <div style={{ ...cardStyle, padding: 18, marginBottom: 18 }}>
+          <div style={eyebrow(10)}>{t.inUseEyebrow}</div>
+          <div style={{ display: "grid", gap: 14 }}>
+            {ROLES.map((role) => {
+              const cur = data?.roles?.[role.key] || "";
+              const res = testResult[cur];
+              return (
+                <div key={role.key} style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                  <div style={{ minWidth: 190 }}>
+                    <div style={{ fontFamily: FZH, fontWeight: 700, fontSize: 14, color: C.ink }}>
+                      {lang === "en" ? role.en : role.zh}
+                    </div>
+                    <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                      {lang === "en" ? role.enSub : role.zhSub}
+                    </div>
+                  </div>
+                  <Select value={cur} onValueChange={(v: string) => setRole(role.key, v)} disabled={busy}>
+                    <SelectTrigger style={{ ...inputStyle, width: 260, background: C.surface }}>
+                      <SelectValue placeholder={t.notChosen} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {models.map((m) => (
+                        <SelectItem key={m.modelName} value={m.modelName}>{m.modelName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {cur && (
+                    <Button style={btnGhost} onClick={() => testModel(cur)} disabled={!!testing}>
+                      {testing === cur ? t.testing : t.test}
+                    </Button>
+                  )}
+                  {cur && res && (
+                    <Badge style={res.ok ? pill(C.ok, C.okTint) : pill(C.ng, C.ngTint)}
+                           title={res.ok ? res.reply : res.error}>
+                      {res.ok ? t.usable : t.unusable}
                     </Badge>
-                  </TableCell>
-                  <TableCell style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                    {m.dbManaged ? (
-                      <>
-                        <Button style={{ ...btnGhost, marginRight: 8 }} size="sm" onClick={() => openAdd(m)} disabled={busy}>
-                          {t.save}
-                        </Button>
-                        <Button style={{ ...btnGhost, color: C.ng, borderColor: `${C.ng}55` }} size="sm"
-                                onClick={() => removeModel(m)} disabled={busy}>
-                          <Trash2 size={14} style={{ marginRight: 4 }} />{t.delete}
-                        </Button>
-                      </>
-                    ) : (
-                      <span style={{ fontSize: 12, color: C.muted }}>{t.yamlHint}</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                  )}
+                  {!cur && <span style={{ fontSize: 12, color: C.warn }}>{t.pickOne}</span>}
+                </div>
+              );
+            })}
+          </div>
         </div>
+        {modelTable}
+        </>
       )}
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>

@@ -1,0 +1,13 @@
+key: model_set_role
+name: 切换使用中的模型
+description: 把某个模型设为「基准模型」或「图片识别」的使用中模型;仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 切换结果
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

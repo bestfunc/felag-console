@@ -1,0 +1,13 @@
+key: model_test
+name: 测试模型可用性
+description: 实际调用一次该模型,回答它现在能不能用(网关不回传密钥字段,只能实调);仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 测试结果(ok / 原因)
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

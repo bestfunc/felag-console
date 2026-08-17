@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "切换使用中的模型",
+  "required": [
+    "role",
+    "model_name"
+  ],
+  "properties": {
+    "role": {
+      "type": "string",
+      "title": "角色",
+      "enum": [
+        "role_chat",
+        "role_vision"
+      ],
+      "description": "role_chat=基准模型(对话主力)；role_vision=图片识别"
+    },
+    "model_name": {
+      "type": "string",
+      "title": "模型名"
+    }
+  }
+}

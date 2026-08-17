@@ -78,6 +78,48 @@ def handle_model_upsert(params, conn, provider, actor) -> dict:
     return {"ok": True, "model_name": model_name}
 
 
+ROLE_LABELS = {"role_chat": "基准模型", "role_vision": "图片识别"}
+
+
+def handle_model_set_role(params, conn, provider, actor) -> dict:
+    """把某个模型设为某角色的「使用中」。
+    分基准对话 / 图片识别两个角色而不是一个"默认模型":识图模型不擅长工具编排、
+    主力模型看不了图,能力不重叠,混成一个必然有一边是错的。"""
+    _require_superadmin(actor)
+    role = (params.get("role") or "").strip()
+    model_name = (params.get("model_name") or "").strip()
+    if role not in ROLE_LABELS:
+        raise NodeError(f"未知角色: {role}")
+    if not model_name:
+        raise NodeError("请选择模型")
+
+    base, token = _conn_cfg(conn)
+    try:
+        server.set_role(base, token, role, model_name)
+    except server.ServerError as e:
+        raise NodeError(str(e)) from e
+
+    store.add_audit(conn, actor.user_id, "model.set_role", model_name, {"role": role})
+    conn.commit()
+    return {"ok": True, "role": role, "model_name": model_name}
+
+
+def handle_model_test(params, conn, provider, actor) -> dict:
+    """实调一次该模型,回答"现在能不能用"。
+    失败不抛异常 —— 它是正常结果之一(密钥错/额度尽/上游挂),要让界面显示原因。"""
+    _require_superadmin(actor)
+    model_name = (params.get("model_name") or "").strip()
+    if not model_name:
+        raise NodeError("请选择模型")
+    base, token = _conn_cfg(conn)
+    try:
+        out = server.test_model(base, token, model_name)
+    except server.ServerError as e:
+        return {"ok": False, "model_name": model_name, "error": str(e)}
+    return {"ok": bool(out.get("ok")), "model_name": model_name,
+            "reply": out.get("reply", ""), "error": out.get("error", "")}
+
+
 def handle_model_delete(params, conn, provider, actor) -> dict:
     """删除一个模型(按网关侧 id)。yaml 里定义的模型网关会拒删,错误原样透出。"""
     _require_superadmin(actor)

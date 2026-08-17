@@ -64,6 +64,18 @@ def upsert_model(base_url: str, token: str, model_name: str, upstream: str,
     return _call(base_url, token, "/admin/models", payload, method="POST")
 
 
+def set_role(base_url: str, token: str, role: str, model_name: str) -> dict:
+    """POST /admin/models/role —— 一键切换某角色(基准对话 / 图片识别)的「使用中」模型。"""
+    return _call(base_url, token, "/admin/models/role",
+                 {"role": role, "modelName": model_name}, method="POST")
+
+
+def test_model(base_url: str, token: str, model_name: str) -> dict:
+    """POST /admin/models/test —— 实调一次,回答"这个模型现在能不能用"。
+    这是唯一可靠的可用性来源:网关对任何模型都不回传密钥字段,光看配置只能猜。"""
+    return _call(base_url, token, "/admin/models/test", {"modelName": model_name}, method="POST")
+
+
 def delete_model(base_url: str, token: str, model_id: str) -> dict:
     """POST /admin/models/delete。只能删经本页面写进网关库的模型(yaml 里定义的网关会拒)。"""
     return _call(base_url, token, "/admin/models/delete", {"id": model_id}, method="POST")
