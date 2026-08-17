@@ -23,6 +23,22 @@ OFFICIAL_PLUGINS = [
         "cred_keys": ["lark_app_id", "lark_app_secret"],
         "secret_keys": ["lark_app_secret"],
     },
+    {
+        "key": "felag-vision",
+        "plugin": "felag-vision",
+        "git_url": "https://github.com/bestfunc/felag-console.git",
+        "branch": "main",
+        "display_name": "图片视频识别",
+        "display_name_en": "Image & Video Understanding",
+        "description": "数字员工可以看图和看视频：描述内容、转录图中文字、概括视频。"
+                       "识别经 felag-server 转网关，上游密钥不下发到客户端；识别用哪个模型在「模型与密钥」页设置。",
+        # 🔒 这里**不含任何 LLM key** —— 识图用的上游密钥必须留在网关(M5),
+        # 绝不像飞书那样注入包内下发。felag_vision_token 只是"能敲 felag-server 的门"的
+        # 服务令牌,且由 server 自举写进本表、摄取时自动注入 —— **管理员一个字都不用填**,
+        # 打开「配置凭据」会看到它已是已配状态。
+        "cred_keys": ["felag_vision_token"],
+        "secret_keys": ["felag_vision_token"],
+    },
 ]
 
 _BY_KEY = {p["key"]: p for p in OFFICIAL_PLUGINS}

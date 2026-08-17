@@ -50,6 +50,9 @@ const I18N = {
     needCredsFirst: "请先配置应用凭据再启用", noEnabledScopes: "尚未在任何作用域启用",
     pickScopeEnable: "选择作用域后启用",
     enabledMark: "已启用", credConfiguredHint: "已配置，留空表示不修改", statusNotEnabled: "未启用",
+    scopeTreeTitle: "在哪些范围启用",
+    scopeTreeHint: "勾选即生效，取消勾选即停用（约 30 秒内下发到客户端）",
+    applying: "生效中…",
   },
   en: {
     reqFail: "Request failed",
@@ -92,6 +95,9 @@ const I18N = {
     needCredsFirst: "Configure credentials before enabling", noEnabledScopes: "Not enabled in any scope",
     pickScopeEnable: "Pick a scope then enable",
     enabledMark: "Enabled", credConfiguredHint: "Configured; leave blank to keep unchanged", statusNotEnabled: "Not enabled",
+    scopeTreeTitle: "Enable for",
+    scopeTreeHint: "Tick to enable, untick to disable (reaches clients within ~30s)",
+    applying: "applying…",
   },
 };
 type Dict = typeof I18N.zh;
@@ -182,6 +188,68 @@ function StatusBadge({ status }: { status: string }) {
 
 // 作用域列式级联(changeOnSelect):点任一节点=直接选中它(总部=全部部门 / 部门=该部门全部岗位 / 岗位=该岗位),
 // 含子级的节点点选后右侧自动展开供细选,无需再点三角。右侧件数徽章提示"还能往下选"(用 mono 文本非符号图标,合白名单)。
+// ScopeCheckTree —— 勾选式生效范围树。
+// 勾上即启用、取消即停用,**状态就是勾选本身**,没有第二个按钮要按。
+// (旧版把「已启用作用域」和「启用到作用域」拆成两块,再配一个状态挂在临时选中值上的
+//  「启用」按钮 —— 于是"已启用:总部"旁边还杵着一个"启用",没人看得懂。)
+// 平台 UI 白名单里没有 Checkbox 组件,方框自绘;勾用已验证的 Check 图标。
+function ScopeCheckTree({
+  scopes, enabled, disabled, busy, pluginKey, onToggle,
+}: {
+  scopes: Scope[]; enabled: string[]; disabled: boolean;
+  busy: Record<string, boolean>; pluginKey: string;
+  onToggle: (ref: string, isOn: boolean) => void;
+}) {
+  const t = I18N[useCurrentLanguage()];
+  const refset = new Set(scopes.map((s) => s.scope_ref));
+  const isRoot = (s: Scope) => !s.parent_ref || !refset.has(s.parent_ref);
+  const childrenOf = (ref: string) =>
+    scopes.filter((s) => s.parent_ref === ref).sort((a, b) => a.label.localeCompare(b.label));
+  const roots = scopes.filter(isRoot).sort((a, b) => a.label.localeCompare(b.label));
+  const on = new Set(enabled);
+
+  const row = (n: Scope, depth: number): React.ReactNode => {
+    const checked = on.has(n.scope_ref);
+    const pending = !!busy[pluginKey + "|" + n.scope_ref];
+    const kids = childrenOf(n.scope_ref);
+    return (
+      <div key={n.scope_ref}>
+        <div
+          onClick={() => { if (!disabled && !pending) onToggle(n.scope_ref, checked); }}
+          style={{
+            display: "flex", alignItems: "center", gap: 9,
+            padding: "7px 10px", marginLeft: depth * 20, borderRadius: 10,
+            cursor: disabled || pending ? "not-allowed" : "pointer",
+            opacity: disabled ? 0.5 : pending ? 0.6 : 1,
+            background: checked ? C.okTint : "transparent",
+          }}
+        >
+          <span style={{
+            width: 17, height: 17, flexShrink: 0, borderRadius: 5,
+            border: `1.5px solid ${checked ? C.ok : C.line}`,
+            background: checked ? C.ok : C.surface,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            {checked && <Check className="size-3" style={{ color: "#fff" }} />}
+          </span>
+          <span style={{ fontFamily: FZH, fontSize: 13.5, color: checked ? C.ink : C.body }}>{n.label}</span>
+          {pending && <span style={{ fontFamily: FMONO, fontSize: 11, color: C.muted }}>{t.applying}</span>}
+        </div>
+        {kids.map((k) => row(k, depth + 1))}
+      </div>
+    );
+  };
+
+  if (!scopes.length) {
+    return <div style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>{t.colEmpty}</div>;
+  }
+  return (
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: 14, background: C.surface, padding: 6, maxHeight: 320, overflowY: "auto" }}>
+      {roots.map((r) => row(r, 0))}
+    </div>
+  );
+}
+
 function ScopeCascader({ scopes, value, onChange }: { scopes: Scope[]; value: string; onChange: (ref: string) => void }) {
   const t = I18N[useCurrentLanguage()];
   const [path, setPath] = useState<string[]>([]);
@@ -274,9 +342,10 @@ export default function PluginSourceManager() {
   const [viewing, setViewing] = useState<Source | null>(null);
   const [busy, setBusy] = useState(false);
   // 官方插件 tab
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({}); // 列表行展开态
+  const [scopeBusy, setScopeBusy] = useState<Record<string, boolean>>({}); // 正在切换的 plugin|scope
   const [tab, setTab] = useState<"git" | "official">("git");
   const [official, setOfficial] = useState<OfficialPlugin[]>([]);
-  const [enScope, setEnScope] = useState<Record<string, string>>({}); // pluginKey → 待启用 scope_ref
   const [credEditing, setCredEditing] = useState<OfficialPlugin | null>(null);
   const [credForm, setCredForm] = useState({ lark_app_id: "", lark_app_secret: "" });
   const [credBusy, setCredBusy] = useState(false);
@@ -384,19 +453,21 @@ export default function PluginSourceManager() {
   }
 
   // 官方插件:在某作用域启用/停用;配置应用凭据(超管)
-  async function enableOfficial(plugin_key: string) {
-    const scope_ref = enScope[plugin_key];
-    if (!scope_ref) { toast.error(t.needScope); return; }
+  // toggleScope 是勾选交互的唯一入口 —— 勾上即启用、取消即停用。
+  // 不再有独立的「启用」按钮:那个按钮的状态挂在 cascader 的临时选中值上,
+  // 与插件的实际启用状态无关,于是"已启用:总部"旁边还杵着一个"启用",没人看得懂。
+  async function toggleScope(plugin_key: string, scope_ref: string, enabled: boolean) {
+    const busyKey = plugin_key + "|" + scope_ref;
+    setScopeBusy((m) => ({ ...m, [busyKey]: true }));
     try {
-      await callNode("official_enable", { plugin_key, scope_ref }, t);
-      toast.success(t.enabledOk); refresh();
-    } catch (e: any) { toast.error(e.message); }
-  }
-  async function disableOfficial(plugin_key: string, scope_ref: string) {
-    try {
-      await callNode("official_disable", { plugin_key, scope_ref }, t);
-      toast.success(t.disabledOk); refresh();
-    } catch (e: any) { toast.error(e.message); }
+      await callNode(enabled ? "official_disable" : "official_enable", { plugin_key, scope_ref }, t);
+      toast.success(enabled ? t.disabledOk : t.enabledOk);
+      await refresh();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setScopeBusy((m) => { const n = { ...m }; delete n[busyKey]; return n; });
+    }
   }
   function openCreds(p: OfficialPlugin) {
     // 预填已配的非机密值(app_id)让管理员"知道老的";机密(secret)留空 = 不修改。
@@ -450,71 +521,57 @@ export default function PluginSourceManager() {
       </div>
 
       {tab === "official" && (
-        <div className="space-y-4">
-          {official.map((p) => {
+        <div style={cardStyle}>
+          {/* 列表 + 展开:收起时一行看完「谁 / 开没开 / 凭据齐没齐」,
+              展开后直接勾选生效范围 —— 勾上即启用、取消即停用,没有第二个按钮要按。 */}
+          {official.map((p, idx) => {
             const dn = lang === "en" && p.display_name_en ? p.display_name_en : p.display_name;
-            const sel = enScope[p.key] || "";                       // 当前在 cascader 选中的 scope
-            const selEnabled = !!sel && p.enabled_scopes.includes(sel); // 选中的 scope 是否已启用 → 按钮切"停用"
+            const open = !!expanded[p.key];
+            const on = p.enabled_scopes.length > 0;
             return (
-              <div key={p.key} style={{ ...cardStyle, padding: 18 }}>
-                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={eyebrow(4)}>{t.officialEyebrow}</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontFamily: FZH, fontWeight: 800, fontSize: 18, color: C.ink }}>{dn}</span>
-                      <Badge style={p.creds_configured ? pill(C.ok, C.okTint) : pill(C.warnText, C.warnBg)}>
-                        {p.creds_configured ? t.credsOk : t.credsMissing}
-                      </Badge>
+              <div key={p.key} style={{ borderTop: idx === 0 ? "none" : `1px solid ${C.line}` }}>
+                <div
+                  onClick={() => setExpanded((m) => ({ ...m, [p.key]: !m[p.key] }))}
+                  style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 18px", cursor: "pointer" }}
+                >
+                  <span style={{ width: 12, flexShrink: 0, color: C.muted, fontSize: 11 }}>{open ? "▾" : "▸"}</span>
+                  <span style={{ fontFamily: FZH, fontWeight: 700, fontSize: 15, color: C.ink, flexShrink: 0 }}>{dn}</span>
+                  <Badge style={on ? pill(C.ok, C.okTint) : pill(C.muted, C.surface2)}>
+                    {on ? `${t.enabledMark} · ${p.enabled_scopes.map(scopeName).join("、")}` : t.statusNotEnabled}
+                  </Badge>
+                  {!p.creds_configured && <Badge style={pill(C.warnText, C.warnBg)}>{t.credsMissing}</Badge>}
+                  <div style={{ flex: 1 }} />
+                  <Button variant="outline" style={btnGhost} onClick={(e) => { e.stopPropagation(); openCreds(p); }}>
+                    {t.setCreds}
+                  </Button>
+                </div>
+
+                {open && (
+                  <div style={{ padding: "0 18px 18px 42px" }}>
+                    <div style={{ fontFamily: FZH, fontSize: 13, color: C.muted, lineHeight: 1.7, marginBottom: 14 }}>
+                      {p.description}
                     </div>
-                    <div style={{ fontFamily: FZH, fontSize: 13, color: C.muted, marginTop: 4 }}>{p.description}</div>
+                    <div style={{ fontFamily: FZH, fontSize: 13, fontWeight: 700, color: C.ink, marginBottom: 2 }}>
+                      {t.scopeTreeTitle}
+                    </div>
+                    <div style={{ fontFamily: FZH, fontSize: 12, color: C.muted, marginBottom: 10 }}>
+                      {p.creds_configured ? t.scopeTreeHint : t.needCredsFirst}
+                    </div>
+                    <ScopeCheckTree
+                      scopes={scopes}
+                      enabled={p.enabled_scopes}
+                      disabled={!p.creds_configured}
+                      busy={scopeBusy}
+                      pluginKey={p.key}
+                      onToggle={(ref, isOn) => toggleScope(p.key, ref, isOn)}
+                    />
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                    <Badge style={p.enabled_scopes.length ? pill(C.ok, C.okTint) : pill(C.muted, C.surface2)}>
-                      {p.enabled_scopes.length ? `${t.enabledMark} · ${p.enabled_scopes.length}` : t.statusNotEnabled}
-                    </Badge>
-                    <Button variant="outline" style={btnGhost} onClick={() => openCreds(p)}>{t.setCreds}</Button>
-                  </div>
-                </div>
-
-                {/* 已启用作用域 */}
-                <div style={{ marginTop: 14 }}>
-                  <div style={{ ...eyebrow(6) }}>{t.enabledScopesLabel}</div>
-                  {p.enabled_scopes.length === 0
-                    ? <div style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>{t.noEnabledScopes}</div>
-                    : <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                        {p.enabled_scopes.map((s) => (
-                          <span key={s} style={{ display: "flex", alignItems: "center", gap: 6, ...pill(C.ok, C.okTint), padding: "4px 10px" }}>
-                            {scopeName(s)}
-                            <X className="size-3" style={{ cursor: "pointer" }} onClick={() => disableOfficial(p.key, s)} />
-                          </span>
-                        ))}
-                      </div>}
-                </div>
-
-                {/* 启用到新作用域 */}
-                <div style={{ marginTop: 14, borderTop: `1px solid ${C.surface2}`, paddingTop: 14 }}>
-                  <div style={{ ...eyebrow(6) }}>{t.enableHere}</div>
-                  <ScopeCascader scopes={scopes} value={sel}
-                    onChange={(v) => setEnScope((m) => ({ ...m, [p.key]: v }))} />
-                  <div style={{ marginTop: 10 }}>
-                    {selEnabled ? (
-                      // 选中的 scope 已启用 → 按钮切为「停用」(启停切换)
-                      <Button variant="outline" style={btnGhost} onClick={() => disableOfficial(p.key, sel)}>
-                        <X className="size-4 mr-1" />{t.disableBtn}
-                      </Button>
-                    ) : (
-                      <Button style={{ ...btnPrimary, opacity: p.creds_configured ? 1 : 0.5 }} disabled={!p.creds_configured}
-                        onClick={() => enableOfficial(p.key)}>
-                        <Check className="size-4 mr-1" />{p.creds_configured ? t.enableBtn : t.needCredsFirst}
-                      </Button>
-                    )}
-                  </div>
-                </div>
+                )}
               </div>
             );
           })}
           {official.length === 0 && (
-            <div style={{ ...cardStyle, padding: 32, textAlign: "center", fontFamily: FMONO, fontSize: 13, color: C.muted }}>{t.noOfficial}</div>
+            <div style={{ padding: 32, textAlign: "center", fontFamily: FMONO, fontSize: 13, color: C.muted }}>{t.noOfficial}</div>
           )}
         </div>
       )}
