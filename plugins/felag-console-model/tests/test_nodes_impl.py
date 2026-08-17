@@ -87,12 +87,35 @@ def test_list_without_token_returns_hint_not_error():
 def test_list_passes_through_server_view(monkeypatch):
     provider, actor = _actor()
     monkeypatch.setattr(server, "list_models",
-                        lambda b, t: [{"modelName": "deepseek-v4-pro", "keyConfigured": True}])
+                        lambda b, t: {"models": [{"modelName": "deepseek-v4-pro"}], "roles": {}})
     out = nodes_impl.handle_model_list({}, _configured_conn(), provider, actor)
     assert out["configured"] is True
     assert out["models"][0]["modelName"] == "deepseek-v4-pro"
     # 配置视图里令牌只能是布尔,不能是值
     assert out["config"]["felag_model_admin_token"] is True
+
+
+def test_list_carries_roles(monkeypatch):
+    """🔴 界面靠 roles 显示「使用中的模型」。这一段曾在 python 层被丢掉(只取了 models),
+    结果切换明明成功、界面却永远显示"未选择"。回归守卫。"""
+    provider, actor = _actor()
+    monkeypatch.setattr(server, "list_models", lambda b, t: {
+        "models": [{"modelName": "glm-4.6v-flash"}],
+        "roles": {"role_chat": "deepseek-v4-pro", "role_vision": "glm-4.6v-flash"},
+    })
+    out = nodes_impl.handle_model_list({}, _configured_conn(), provider, actor)
+    assert out["roles"]["role_chat"] == "deepseek-v4-pro"
+    assert out["roles"]["role_vision"] == "glm-4.6v-flash"
+
+
+def test_test_marks_rate_limit_distinctly(monkeypatch):
+    """限流 ≠ 不可用。免费档上游随手一测就 429,报成"不可用"会让运维去重配好端端的密钥。"""
+    provider, actor = _actor()
+    monkeypatch.setattr(server, "test_model",
+                        lambda b, t, n: {"ok": False, "rateLimited": True, "error": "上游限流"})
+    out = nodes_impl.handle_model_test({"model_name": "glm-4.6v-flash"},
+                                       _configured_conn(), provider, actor)
+    assert out["ok"] is False and out["rate_limited"] is True
 
 
 # ── 新增 / 更新 ────────────────────────────────────────────────────────

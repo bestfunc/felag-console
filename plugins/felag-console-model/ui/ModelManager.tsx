@@ -16,22 +16,29 @@ const I18N = {
     reqFail: "请求失败",
     title: "模型与密钥", refresh: "刷新", addBtn: "新增模型", connBtn: "连接配置",
     eyebrow: "MODELS · 模型与密钥",
+    // 网关对任何模型都不回传 api_key，所以本页无法显示“密钥配没配”——那一列只能显示
+    // “我看不见”，反而会让人以为没配。要判断能不能用，点「检测」实调一次。
     lead: "数字员工可用的 LLM 模型在这里维护。上游密钥只经 felag-server 透传给网关保存，" +
-      "不落本平台数据库、也不会回显——列表只显示“已配置 / 未配置”。",
+      "不落本平台数据库、也读不回来——要确认某个模型是否可用，点它的「检测」实调一次。",
     notConfigured: "服务令牌尚未就绪",
     advanced: "手动配置（高级）",
     connectedTo: (u: string) => `当前连接 ${u}`,
-    thModel: "模型名", thUpstream: "上游", thBase: "上游地址", thKey: "密钥", thSource: "来源", thOps: "操作",
+    thModel: "模型名", thUpstream: "上游", thBase: "上游地址", thSource: "来源", thOps: "操作",
     inUseEyebrow: "IN USE · 使用中的模型",
+    inUseLead: "数字员工按角色取模型:对话走基准模型，看图看视频走图片识别模型。选哪个就走哪个。",
     notChosen: "未选择", pickOne: "请选一个",
+    notChosenTip: "尚未指定，该能力当前不可用",
     roleSwitched: (m: string) => `已切换为 ${m}`,
+    switchLabel: "切换模型",
     test: "测试", testing: "测试中…", usable: "可用", unusable: "不可用",
+    check: "检测", notTested: "未检测", notTestedTip: "点「检测」实调一次，确认它现在能不能用",
+    limited: "限流中", limitedTip: "上游免费档配额/并发已满 —— 密钥与模型本身没问题，稍后再检测即可",
+    checkedAt: (s: string) => `检测于 ${s}`,
+    missingModel: "网关上已无此模型",
     testOk: (m: string) => `${m} 可用`, testFail: (m: string) => `${m} 不可用`,
+    testLimited: (m: string) => `${m} 上游限流，稍后再试`,
     inUseAs: (r: string) => `使用中 · ${r}`,
     edit: "编辑",
-    keyOk: "已配置", keyNo: "未配置", keyRef: (r: string) => `环境变量 ${r}`,
-    keyUnknown: "网关未回传",
-    keyUnknownTip: "网关对配置文件里定义的模型不返回密钥字段，无法判断是否已配置（不等于没配）",
     srcDb: "本页面注册", srcYaml: "配置文件",
     yamlHint: "配置文件里定义的模型只能在网关配置文件里改，本页面不可删",
     empty: "网关上还没有模型",
@@ -57,21 +64,27 @@ const I18N = {
     title: "Models & Keys", refresh: "Refresh", addBtn: "Add model", connBtn: "Connection",
     eyebrow: "MODELS · KEYS",
     lead: "Maintain the LLM models available to digital employees. Upstream keys are passed through " +
-      "felag-server to the gateway and stored there — never in this platform's database, and never read back.",
+      "felag-server to the gateway and stored there — never in this platform's database, and never read back. " +
+      "To confirm a model works, hit Check to make a real call.",
     notConfigured: "Service token not ready yet",
     advanced: "Manual setup (advanced)",
     connectedTo: (u: string) => `Connected to ${u}`,
-    thModel: "Model", thUpstream: "Upstream", thBase: "API base", thKey: "Key", thSource: "Source", thOps: "Actions",
+    thModel: "Model", thUpstream: "Upstream", thBase: "API base", thSource: "Source", thOps: "Actions",
     inUseEyebrow: "IN USE",
+    inUseLead: "Digital employees pick a model by role: chat uses the base model, images and video use the vision model.",
     notChosen: "Not selected", pickOne: "Pick one",
+    notChosenTip: "Not set — this capability is unavailable",
     roleSwitched: (m: string) => `Switched to ${m}`,
+    switchLabel: "Switch model",
     test: "Test", testing: "Testing…", usable: "Usable", unusable: "Unusable",
+    check: "Check", notTested: "Not checked", notTestedTip: "Run a real call to see whether it works right now",
+    limited: "Rate limited", limitedTip: "Upstream free-tier quota/concurrency is full — the key and model are fine, just retry later",
+    checkedAt: (s: string) => `checked ${s}`,
+    missingModel: "No longer on the gateway",
     testOk: (m: string) => `${m} is usable`, testFail: (m: string) => `${m} is not usable`,
+    testLimited: (m: string) => `${m}: upstream rate limited, retry later`,
     inUseAs: (r: string) => `In use · ${r}`,
     edit: "Edit",
-    keyOk: "Configured", keyNo: "Not set", keyRef: (r: string) => `env ${r}`,
-    keyUnknown: "Not reported",
-    keyUnknownTip: "The gateway does not return the key field for models defined in its config file — this does not mean it is unset",
     srcDb: "Added here", srcYaml: "Config file",
     yamlHint: "Models defined in the gateway config file can only be changed there",
     empty: "No models on the gateway yet",
@@ -139,6 +152,11 @@ interface ListResp {
   hint?: string;
 }
 
+/** 一次实调的结果。rateLimited 与 ok=false **刻意分开**:免费档上游(智谱 glm-*-flash)
+ *  单并发 + 5 小时滚动配额,随手一测就 429。把限流显示成"不可用",运维就会去重配
+ *  一把好端端的密钥 —— 真机上已经这么误判过一次。 */
+interface TestState { ok: boolean; rate_limited?: boolean; reply?: string; error?: string; at: string }
+
 // 两个角色。分开而不是一个"默认模型":识图模型不擅长工具编排、主力模型看不了图,
 // 能力不重叠,混成一个必然有一边是错的。
 const ROLES = [
@@ -181,7 +199,7 @@ export default function ModelManager() {
   const [cBase, setCBase] = useState("");
   const [cToken, setCToken] = useState("");
   const [testing, setTesting] = useState("");
-  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; reply?: string; error?: string }>>({});
+  const [testResult, setTestResult] = useState<Record<string, TestState>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -245,19 +263,30 @@ export default function ModelManager() {
   // 光看配置只能猜 —— 猜错比不显示更糟,所以这里只给实测结果。
   async function testModel(name: string) {
     setTesting(name);
-    setTestResult((m) => ({ ...m, [name]: undefined as any }));
+    setTestResult((m) => { const n = { ...m }; delete n[name]; return n; });
+    const at = new Date().toLocaleTimeString();
     try {
-      const r = await callNode<{ ok: boolean; reply?: string; error?: string }>(
-        "model_test", { model_name: name }, t);
-      setTestResult((m) => ({ ...m, [name]: r }));
+      const r = await callNode<Omit<TestState, "at">>("model_test", { model_name: name }, t);
+      setTestResult((m) => ({ ...m, [name]: { ...r, at } }));
       if (r.ok) toast.success(t.testOk(name));
+      else if (r.rate_limited) toast.error(t.testLimited(name));
       else toast.error(t.testFail(name));
     } catch (e: any) {
-      setTestResult((m) => ({ ...m, [name]: { ok: false, error: String(e.message || e) } }));
+      setTestResult((m) => ({ ...m, [name]: { ok: false, error: String(e.message || e), at } }));
       toast.error(String(e.message || e));
     } finally {
       setTesting("");
     }
+  }
+
+  /** 把一次实调结果压成一个状态徽标。三态而非两态 —— 见 TestState 注释。 */
+  function statusPill(name: string) {
+    if (testing === name) return <Badge style={pill(C.signal, C.blueTint)}>{t.testing}</Badge>;
+    const r = testResult[name];
+    if (!r) return <Badge style={{ ...pill(C.muted, C.surface2) }} title={t.notTestedTip}>{t.notTested}</Badge>;
+    if (r.ok) return <Badge style={pill(C.ok, C.okTint)} title={r.reply}>{t.usable}</Badge>;
+    if (r.rate_limited) return <Badge style={pill(C.warn, C.warnTint)} title={t.limitedTip}>{t.limited}</Badge>;
+    return <Badge style={pill(C.ng, C.ngTint)} title={r.error}>{t.unusable}</Badge>;
   }
 
   async function removeModel(row: ModelRow) {
@@ -330,30 +359,26 @@ export default function ModelManager() {
                     {m.dbManaged ? t.srcDb : t.srcYaml}
                   </Badge>
                 </TableCell>
-                <TableCell style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                  {res && (
-                    <Badge style={{ ...(res.ok ? pill(C.ok, C.okTint) : pill(C.ng, C.ngTint)), marginRight: 8 }}
-                           title={res.ok ? res.reply : res.error}>
-                      {res.ok ? t.usable : t.unusable}
-                    </Badge>
-                  )}
-                  <Button style={{ ...btnGhost, marginRight: 8 }} size="sm"
-                          onClick={() => testModel(m.modelName)} disabled={!!testing}>
-                    {testing === m.modelName ? t.testing : t.test}
-                  </Button>
-                  {m.dbManaged ? (
-                    <>
-                      <Button style={{ ...btnGhost, marginRight: 8 }} size="sm" onClick={() => openAdd(m)} disabled={busy}>
-                        {t.edit}
-                      </Button>
-                      <Button style={{ ...btnGhost, color: C.ng, borderColor: `${C.ng}55` }} size="sm"
-                              onClick={() => removeModel(m)} disabled={busy}>
-                        <Trash2 size={14} style={{ marginRight: 4 }} />{t.delete}
-                      </Button>
-                    </>
-                  ) : (
-                    <span style={{ fontSize: 12, color: C.muted }}>{t.yamlHint}</span>
-                  )}
+                <TableCell>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end" }}>
+                    {res && statusPill(m.modelName)}
+                    <Button style={btnGhost} size="sm"
+                            onClick={() => testModel(m.modelName)} disabled={!!testing}>
+                      {testing === m.modelName ? t.testing : t.test}
+                    </Button>
+                    {/* yaml 定义的模型 LiteLLM 不接受 API 改动。原来这里铺一整句说明,
+                        把操作列撑得比模型名还宽 —— 收成禁用按钮 + tooltip,理由不丢但不喧宾夺主。 */}
+                    <Button style={{ ...btnGhost, opacity: m.dbManaged ? 1 : .45 }} size="sm"
+                            onClick={() => openAdd(m)} disabled={busy || !m.dbManaged}
+                            title={m.dbManaged ? undefined : t.yamlHint}>
+                      {t.edit}
+                    </Button>
+                    <Button style={{ ...btnGhost, color: C.ng, borderColor: `${C.ng}55`, opacity: m.dbManaged ? 1 : .45 }}
+                            size="sm" onClick={() => removeModel(m)} disabled={busy || !m.dbManaged}
+                            title={m.dbManaged ? undefined : t.yamlHint}>
+                      <Trash2 size={14} style={{ marginRight: 4 }} />{t.delete}
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             );
@@ -412,45 +437,71 @@ export default function ModelManager() {
         </div>
       ) : (
         <>
-        {/* 使用中的模型:基准 / 识图 分开选,选哪个就走哪个 */}
-        <div style={{ ...cardStyle, padding: 18, marginBottom: 18 }}>
-          <div style={eyebrow(10)}>{t.inUseEyebrow}</div>
-          <div style={{ display: "grid", gap: 14 }}>
+        {/* 使用中的模型:一个角色一张卡,当前选中的模型名是卡上最大的字。
+            上一版把两行挤在一张卡里、状态只在点过「测试」后才冒出来 —— 光看页面
+            答不上"现在到底在用谁、它好不好使",而这正是本页要回答的第一个问题。 */}
+        <div style={{ marginBottom: 20 }}>
+          <div style={eyebrow(4)}>{t.inUseEyebrow}</div>
+          <div style={{ fontSize: 13, color: C.muted, marginBottom: 12, lineHeight: 1.7 }}>{t.inUseLead}</div>
+          <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit,minmax(330px,1fr))" }}>
             {ROLES.map((role) => {
               const cur = data?.roles?.[role.key] || "";
+              const row = models.find((m) => m.modelName === cur);
               const res = testResult[cur];
+              const missing = !!cur && !row; // 角色指着一个已被删掉的模型 —— 静默失效最难查
               return (
-                <div key={role.key} style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-                  <div style={{ minWidth: 190 }}>
-                    <div style={{ fontFamily: FZH, fontWeight: 700, fontSize: 14, color: C.ink }}>
+                <div key={role.key} style={{
+                  ...cardStyle, padding: 18,
+                  borderColor: cur ? C.line : `${C.warn}66`,
+                  background: cur ? "rgba(255,255,255,.92)" : C.warnTint,
+                }}>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                    <div style={{ fontFamily: FZH, fontWeight: 800, fontSize: 15, color: C.ink }}>
                       {lang === "en" ? role.en : role.zh}
                     </div>
-                    <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
-                      {lang === "en" ? role.enSub : role.zhSub}
-                    </div>
+                    {cur && statusPill(cur)}
                   </div>
-                  <Select value={cur} onValueChange={(v: string) => setRole(role.key, v)} disabled={busy}>
-                    <SelectTrigger style={{ ...inputStyle, width: 260, background: C.surface }}>
-                      <SelectValue placeholder={t.notChosen} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {models.map((m) => (
-                        <SelectItem key={m.modelName} value={m.modelName}>{m.modelName}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {cur && (
-                    <Button style={btnGhost} onClick={() => testModel(cur)} disabled={!!testing}>
-                      {testing === cur ? t.testing : t.test}
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 3, lineHeight: 1.6 }}>
+                    {lang === "en" ? role.enSub : role.zhSub}
+                  </div>
+
+                  <div style={{ margin: "14px 0 12px", paddingTop: 12, borderTop: `1px dashed ${C.line}` }}>
+                    <div style={{
+                      fontFamily: FMONO, fontSize: cur ? 17 : 14, fontWeight: 700,
+                      color: cur ? C.ink : C.warn, wordBreak: "break-all", lineHeight: 1.35,
+                    }}>
+                      {cur || t.notChosen}
+                    </div>
+                    <div style={{ fontSize: 12, color: C.muted, marginTop: 4, minHeight: 18, fontFamily: FMONO }}>
+                      {missing ? <span style={{ color: C.ng }}>{t.missingModel}</span>
+                        : cur ? (row?.upstream || "—")
+                        : <span style={{ color: C.warn, fontFamily: FZH }}>{t.notChosenTip}</span>}
+                    </div>
+                    {cur && res?.at && (
+                      <div style={{ fontSize: 11.5, color: C.muted, marginTop: 6 }}>
+                        {t.checkedAt(res.at)}
+                        {!res.ok && res.error ? ` · ${res.error.slice(0, 90)}` : ""}
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <Select value={cur} onValueChange={(v: string) => setRole(role.key, v)} disabled={busy}>
+                      <SelectTrigger style={{ ...inputStyle, flex: 1, minWidth: 0, background: C.surface }}
+                                     aria-label={t.switchLabel}>
+                        <SelectValue placeholder={t.pickOne} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {models.map((m) => (
+                          <SelectItem key={m.modelName} value={m.modelName}>{m.modelName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button style={btnGhost} size="sm" onClick={() => testModel(cur)}
+                            disabled={!cur || !!testing}>
+                      {testing === cur ? t.testing : t.check}
                     </Button>
-                  )}
-                  {cur && res && (
-                    <Badge style={res.ok ? pill(C.ok, C.okTint) : pill(C.ng, C.ngTint)}
-                           title={res.ok ? res.reply : res.error}>
-                      {res.ok ? t.usable : t.unusable}
-                    </Badge>
-                  )}
-                  {!cur && <span style={{ fontSize: 12, color: C.warn }}>{t.pickOne}</span>}
+                  </div>
                 </div>
               );
             })}

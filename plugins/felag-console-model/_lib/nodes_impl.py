@@ -48,10 +48,11 @@ def handle_model_list(params, conn, provider, actor) -> dict:
                         "请确认 felag-server 已升级到 v0.0.27+ 且能连上平台库;"
                         "本插件刚装好时,等它下一轮自举(约 30 秒)后刷新即可。"}
     try:
-        models = server.list_models(base, token)
+        resp = server.list_models(base, token)
     except server.ServerError as e:
         raise NodeError(str(e)) from e
-    return {"models": models, "config": cfg, "configured": True}
+    return {"models": resp.get("models", []), "roles": resp.get("roles", {}),
+            "config": cfg, "configured": True}
 
 
 def handle_model_upsert(params, conn, provider, actor) -> dict:
@@ -106,7 +107,11 @@ def handle_model_set_role(params, conn, provider, actor) -> dict:
 
 def handle_model_test(params, conn, provider, actor) -> dict:
     """实调一次该模型,回答"现在能不能用"。
-    失败不抛异常 —— 它是正常结果之一(密钥错/额度尽/上游挂),要让界面显示原因。"""
+    失败不抛异常 —— 它是正常结果之一(密钥错/额度尽/上游挂),要让界面显示原因。
+
+    rate_limited 单独透出:免费档上游(智谱 glm-*-flash)单并发 + 5 小时滚动配额,
+    随手一测就 429。把它显示成"不可用"是错报——密钥和模型都是好的,只是此刻排不上队,
+    而运维看到"不可用"会去重配密钥,越修越远(真机就这么误判过一次)。"""
     _require_superadmin(actor)
     model_name = (params.get("model_name") or "").strip()
     if not model_name:
@@ -117,6 +122,7 @@ def handle_model_test(params, conn, provider, actor) -> dict:
     except server.ServerError as e:
         return {"ok": False, "model_name": model_name, "error": str(e)}
     return {"ok": bool(out.get("ok")), "model_name": model_name,
+            "rate_limited": bool(out.get("rateLimited")),
             "reply": out.get("reply", ""), "error": out.get("error", "")}
 
 

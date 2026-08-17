@@ -48,9 +48,13 @@ def _call(base_url: str, token: str, path: str, payload=None, method="GET"):
         raise ServerError(f"连接 felag-server 失败: {e}") from e
 
 
-def list_models(base_url: str, token: str) -> list:
-    """GET /admin/models。返回已脱敏的模型视图(只带 keyConfigured / keyRef,无 key 值)。"""
-    return (_call(base_url, token, "/admin/models") or {}).get("models", [])
+def list_models(base_url: str, token: str) -> dict:
+    """GET /admin/models。回整个响应:models(已脱敏,无 key 值)+ roles(各角色使用中的模型)。
+
+    ⚠️ 早先这里只取 models、把 roles 丢了,界面上「使用中的模型」于是永远显示"未选择"——
+    切换其实成功了,只是读回来的那一半没接上。返回整体而不是挑字段,免得再漏。
+    """
+    return _call(base_url, token, "/admin/models") or {}
 
 
 def upsert_model(base_url: str, token: str, model_name: str, upstream: str,
