@@ -22,6 +22,8 @@ const I18N = {
     connectedTo: (u: string) => `当前连接 ${u}`,
     thModel: "模型名", thUpstream: "上游", thBase: "上游地址", thKey: "密钥", thSource: "来源", thOps: "操作",
     keyOk: "已配置", keyNo: "未配置", keyRef: (r: string) => `环境变量 ${r}`,
+    keyUnknown: "网关未回传",
+    keyUnknownTip: "网关对配置文件里定义的模型不返回密钥字段，无法判断是否已配置（不等于没配）",
     srcDb: "本页面注册", srcYaml: "配置文件",
     yamlHint: "配置文件里定义的模型只能在网关配置文件里改，本页面不可删",
     empty: "网关上还没有模型",
@@ -53,6 +55,8 @@ const I18N = {
     connectedTo: (u: string) => `Connected to ${u}`,
     thModel: "Model", thUpstream: "Upstream", thBase: "API base", thKey: "Key", thSource: "Source", thOps: "Actions",
     keyOk: "Configured", keyNo: "Not set", keyRef: (r: string) => `env ${r}`,
+    keyUnknown: "Not reported",
+    keyUnknownTip: "The gateway does not return the key field for models defined in its config file — this does not mean it is unset",
     srcDb: "Added here", srcYaml: "Config file",
     yamlHint: "Models defined in the gateway config file can only be changed there",
     empty: "No models on the gateway yet",
@@ -109,7 +113,7 @@ const dialogStyle: React.CSSProperties = { background: C.surface, border: `1px s
 
 interface ModelRow {
   id?: string; modelName: string; upstream?: string; provider?: string;
-  apiBase?: string; keyConfigured: boolean; keyRef?: string; dbManaged: boolean;
+  apiBase?: string; keyState: "unknown" | "configured" | "env" | "empty"; keyRef?: string; dbManaged: boolean;
 }
 interface ListResp {
   models: ModelRow[];
@@ -296,9 +300,15 @@ export default function ModelManager() {
                   <TableCell style={{ fontFamily: FMONO, fontSize: 12.5, color: C.body }}>{m.upstream || "—"}</TableCell>
                   <TableCell style={{ fontFamily: FMONO, fontSize: 12, color: C.muted, wordBreak: "break-all" }}>{m.apiBase || "—"}</TableCell>
                   <TableCell>
-                    {m.keyConfigured
-                      ? <Badge style={pill(C.ok, C.okTint)}>{m.keyRef ? t.keyRef(m.keyRef) : t.keyOk}</Badge>
-                      : <Badge style={pill(C.warn, C.warnTint)}>{t.keyNo}</Badge>}
+                    {/* unknown 必须区别于 empty:网关对 yaml 定义的模型不回传 api_key 字段,
+                        把"看不见"显示成"未配置"是假信息(deepseek 就是这么被误报的)。 */}
+                    {m.keyState === "env"
+                      ? <Badge style={pill(C.ok, C.okTint)}>{t.keyRef(m.keyRef || "")}</Badge>
+                      : m.keyState === "configured"
+                      ? <Badge style={pill(C.ok, C.okTint)}>{t.keyOk}</Badge>
+                      : m.keyState === "empty"
+                      ? <Badge style={pill(C.warn, C.warnTint)}>{t.keyNo}</Badge>
+                      : <Badge style={pill(C.muted, C.surface2)} title={t.keyUnknownTip}>{t.keyUnknown}</Badge>}
                   </TableCell>
                   <TableCell>
                     <Badge style={pill(m.dbManaged ? C.signal : C.muted, m.dbManaged ? C.blueTint : C.surface2)}>
