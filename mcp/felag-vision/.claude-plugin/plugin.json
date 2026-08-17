@@ -1,0 +1,20 @@
+{
+  "name": "felag-vision",
+  "version": "0.1.0",
+  "description": "图片/视频识别插件 —— 数字员工可以看图和看视频:描述内容、转录图中文字、概括视频。识别经 felag-server 转网关,上游密钥不下发到客户端。",
+  "mcpServers": {
+    "vision": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/dist/felag-vision.mjs",
+        "serve"
+      ],
+      "env": {
+        "FELAG_SERVER_BASE": "${FELAG_SERVER_BASE}",
+        "FELAG_VISION_TOKEN": "${FELAG_VISION_TOKEN}",
+        "FELAG_VISION_ROOTS": "${FELAG_VISION_ROOTS}"
+      }
+    }
+  }
+}

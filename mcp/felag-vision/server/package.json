@@ -1,0 +1,13 @@
+{
+  "name": "felag-vision-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Felag vision MCP - image/video understanding routed through felag-server (upstream LLM key never leaves the server).",
+  "main": "index.mjs",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.8"
+  }
+}
