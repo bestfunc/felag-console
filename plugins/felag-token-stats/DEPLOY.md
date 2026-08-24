@@ -15,7 +15,7 @@
 
 | alias | 指向 | 说明 |
 |---|---|---|
-| `platform_pg` | `daily_report` | 与 felag-console / felag-app-release **同一条**(平台已建 **凭据 id=4**,已 verify)。查 `users`/`departments` 把 user_id 解析成姓名与部门,审计表也在这。 |
+| `platform_pg` | `daily_report` | 与 felag-console / felag-app-release **同一条**,已存在无需新建(121 上是凭据 **id=16**;**id 各环境不同,以凭据中心里 name=`platform_pg` 的那条为准**)。查 `users`/`departments` 把 user_id 解析成姓名与部门,审计表也在这。 |
 | `litellm_pg` | `litellm` | **需新建**。121/175 上 litellm 库与 daily_report **同属 dr-pg 实例**,所以照抄 platform_pg 的 DSN、只把库名从 `daily_report` 换成 `litellm` 即可,网络天然可达。 |
 
 > ⚠️ 少配 `litellm_pg` 的症状:节点起步即报 `DB_LITELLM_PG_DSN 未注入`。
