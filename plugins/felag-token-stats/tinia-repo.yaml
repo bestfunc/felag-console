@@ -1,6 +1,6 @@
 name: Token 用量统计
-version: 0.1.1
-description: Félag 数字员工的 LLM token 用量统计：按员工/部门/模型/日期聚合 + 逐请求明细，数据来自网关 LiteLLM 的 spend logs
+version: 0.1.2
+description: Félag 数字员工的 LLM token 用量统计：按员工/部门/模型/日期聚合 + 逐请求明细 + 按官方单价估算成本（区分高峰/空闲时段）
 group: Félag
 name_i18n:
   en: Token Usage

@@ -45,9 +45,11 @@ def test_window_converts_local_days_to_utc_bounds():
     conn = RecordingConn()
     store.totals(conn, W)
     sql, args = conn.calls[0]
-    assert "AT TIME ZONE 'UTC'" in sql and "AT TIME ZONE %s" in sql
+    assert "AT TIME ZONE 'UTC'" in sql and "AT TIME ZONE 'Asia/Shanghai'" in sql
     assert "(%s::date + 1)" in sql
-    assert args == ["2026-08-01", "Asia/Shanghai", "2026-08-24", "Asia/Shanghai"]
+    # 时区是内联的(成本表达式要用它三次,走占位符会让参数顺序变得极易错位),
+    # 所以参数里只剩日期边界。
+    assert args == ["2026-08-01", "2026-08-24"]
 
 
 def test_day_grouping_uses_local_calendar_day():
@@ -55,12 +57,40 @@ def test_day_grouping_uses_local_calendar_day():
     store.summary(conn, W, "day")
     sql, args = conn.calls[0]
     assert "to_char" in sql
-    # 维度表达式自带一个 tz 占位符,必须排在 where 的参数之前
-    assert args[0] == "Asia/Shanghai"
+    assert "AT TIME ZONE 'Asia/Shanghai'" in sql
+    assert args == ["2026-08-01", "2026-08-24"]
+
+
+def test_illegal_timezone_is_rejected():
+    """时区内联进 SQL,值域必须锁死 —— 否则它就是个注入口子。"""
+    import pytest
+    conn = RecordingConn()
+    with pytest.raises(ValueError):
+        store.totals(conn, {**W, "tz": "Asia/Shanghai'; DROP TABLE x --"})
+
+
+def test_cost_is_computed_not_read_from_spend_column():
+    """网关三个模型单价全是 0,spend 列恒为 0 —— 读它只会得到"一分钱没花"。"""
+    conn = RecordingConn()
+    store.totals(conn, W)
+    sql, _ = conn.calls[0]
+    assert "sum(spend)" not in sql
+    assert "prompt_tokens *" in sql and "completion_tokens *" in sql
+
+
+def test_peak_hours_match_the_agreed_window():
+    """高峰 = 工作日 9-12、14-18(北京时间),其余含周末减半。写错时段就是静默算错一倍钱。"""
+    conn = RecordingConn()
+    store.totals(conn, W)
+    sql, _ = conn.calls[0]
+    assert "isodow" in sql and "<= 5" in sql
+    assert "'09:00'" in sql and "'12:00'" in sql
+    assert "'14:00'" in sql and "'18:00'" in sql
+    assert "ELSE 0.5" in sql
 
 
 def test_group_dimensions_are_a_closed_whitelist():
-    assert set(store.GROUP_DIMENSIONS) == {"employee", "department", "model", "day"}
+    assert set(store.GROUP_KEYS) == {"employee", "department", "model", "day"}
 
 
 def test_attribution_comes_from_spend_logs_metadata_not_user_column():

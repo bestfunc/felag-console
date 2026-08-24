@@ -67,8 +67,8 @@ def _floats(rows):
         for k in ("requests", "prompt_tokens", "completion_tokens", "total_tokens"):
             if k in r and r[k] is not None:
                 r[k] = int(r[k])
-        if r.get("spend") is not None:
-            r["spend"] = float(r["spend"])
+        if r.get("cost") is not None:
+            r["cost"] = float(r["cost"])
     return rows
 
 
@@ -77,8 +77,8 @@ def handle_usage_summary(params, ll_conn, pg_conn, actor) -> dict:
     _require_super(actor)
     p = _require_window(params)
     group_by = params.get("group_by") or "employee"
-    if group_by not in store.GROUP_DIMENSIONS:
-        raise NodeError(f"group_by 必须是 {' / '.join(store.GROUP_DIMENSIONS)} 之一")
+    if group_by not in store.GROUP_KEYS:
+        raise NodeError(f"group_by 必须是 {' / '.join(store.GROUP_KEYS)} 之一")
 
     rows = _floats(store.summary(ll_conn, p, group_by))
     if group_by == "employee":
@@ -93,6 +93,8 @@ def handle_usage_summary(params, ll_conn, pg_conn, actor) -> dict:
         "totals": _floats([store.totals(ll_conn, p)])[0],
         "trend": _floats(store.summary(ll_conn, p, "day")),
         "models": store.models(ll_conn, p),
+        # 没配单价的模型成本会算成 0 —— 页面要点名它们,否则"0 元"被当成"没花钱"。
+        "unpriced_models": store.unpriced_models(ll_conn, p),
         "range": {"from": p["from"], "to": p["to"], "tz": p["tz"]},
     }
 
@@ -118,7 +120,8 @@ def handle_usage_detail(params, ll_conn, pg_conn, actor) -> dict:
 _EXPORT_COLS = [
     ("ts", "时间"), ("display_name", "员工"), ("dept_name", "部门"), ("model", "模型"),
     ("prompt_tokens", "输入 token"), ("completion_tokens", "输出 token"), ("total_tokens", "总 token"),
-    ("spend", "成本($)"), ("device", "设备"), ("ip", "IP"), ("request_id", "request_id"),
+    ("cost", "成本(元)"), ("peak", "高峰时段"), ("device", "设备"), ("ip", "IP"),
+    ("request_id", "request_id"),
 ]
 
 

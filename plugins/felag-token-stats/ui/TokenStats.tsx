@@ -15,14 +15,19 @@ const I18N = {
     reqFail: "请求失败",
     title: "Token 用量统计", eyebrow: "USAGE · TOKEN 用量",
     lead: "数字员工经 felag-server 发出的每次 LLM 请求,都由网关记下模型与 token 数;这里按员工、" +
-      "部门、模型、日期看消耗,也能逐条查明细。用量数据取自网关自己的账本,与账单同源。",
+      "部门、模型、日期看消耗,也能逐条查明细。token 数取自网关账本(权威值);成本是按官方单价" +
+      "现算的估值,不是账单 —— 口径见成本卡下方说明。",
     refresh: "刷新", export: "导出 CSV", exporting: "导出中…",
     today: "今天", d7: "近 7 天", d30: "近 30 天", to: "至",
     allModels: "全部模型", model: "模型",
     tabAgg: "聚合", tabDetail: "明细",
     byEmployee: "按员工", byDepartment: "按部门", byModel: "按模型", byDay: "按日期",
     cardTotal: "总 token", cardReq: "请求数", cardIn: "输入 token", cardOut: "输出 token", cardSpend: "成本",
-    spendHint: "成本由网关按模型单价算;单价没配的模型会是 0,别当成没花钱。",
+    spendHint: "按官方单价 × token 数估算(元)。已区分高峰/空闲时段;但**未扣缓存命中折扣**," +
+      "缓存命中价只有未命中的 1/30,故这里是上限,真实账单会更低。",
+    unpricedWarn: (ms: string) => `以下模型没配单价,成本按 0 计:${ms}`,
+    thPeak: "时段", peak: "高峰", offPeak: "空闲",
+    peakTip: "工作日 9:00-12:00、14:00-18:00 为高峰;其余(含周末)单价减半",
     trend: "每日消耗", trendEmpty: "该范围内没有用量",
     thName: "名称", thDept: "部门", thReq: "请求数", thIn: "输入", thOut: "输出", thTotal: "总 token", thSpend: "成本",
     thTime: "时间", thEmployee: "员工", thModel: "模型", thDevice: "设备", thIp: "IP", thReqId: "request_id",
@@ -40,14 +45,19 @@ const I18N = {
     title: "Token Usage", eyebrow: "USAGE · TOKENS",
     lead: "Every LLM request digital employees send through felag-server is recorded by the gateway with its " +
       "model and token counts. Break it down by employee, department, model or date, or inspect single requests. " +
-      "The numbers come from the gateway's own ledger — the same source as billing.",
+      "Token counts come from the gateway ledger (authoritative); cost is an estimate computed from official " +
+      "list prices — not an invoice. See the note under the cost card.",
     refresh: "Refresh", export: "Export CSV", exporting: "Exporting…",
     today: "Today", d7: "Last 7 days", d30: "Last 30 days", to: "to",
     allModels: "All models", model: "Model",
     tabAgg: "Aggregate", tabDetail: "Requests",
     byEmployee: "By employee", byDepartment: "By department", byModel: "By model", byDay: "By date",
     cardTotal: "Total tokens", cardReq: "Requests", cardIn: "Input tokens", cardOut: "Output tokens", cardSpend: "Cost",
-    spendHint: "Cost is computed by the gateway from per-model pricing; models with no pricing configured show 0.",
+    spendHint: "Estimated as official unit price × tokens (CNY). Peak/off-peak hours are accounted for, " +
+      "but cache-hit discounts are NOT — cache hits cost 1/30 of a miss, so this is an upper bound.",
+    unpricedWarn: (ms: string) => `No pricing configured for these models, cost counted as 0: ${ms}`,
+    thPeak: "Rate", peak: "Peak", offPeak: "Off-peak",
+    peakTip: "Weekdays 9:00-12:00 and 14:00-18:00 are peak; everything else (incl. weekends) is half price",
     trend: "Daily usage", trendEmpty: "No usage in this range",
     thName: "Name", thDept: "Department", thReq: "Requests", thIn: "Input", thOut: "Output", thTotal: "Total", thSpend: "Cost",
     thTime: "Time", thEmployee: "Employee", thModel: "Model", thDevice: "Device", thIp: "IP", thReqId: "request_id",
@@ -89,13 +99,16 @@ const numCell: React.CSSProperties = { fontFamily: FMONO, textAlign: "right", co
 
 interface AggRow {
   key: string | null; display_name: string; dept_name?: string;
-  requests: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; spend: number;
+  requests: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; cost: number;
 }
-interface Totals { requests: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; spend: number }
-interface SummaryResp { group_by: string; rows: AggRow[]; totals: Totals; trend: AggRow[]; models: string[] }
+interface Totals { requests: number; prompt_tokens: number; completion_tokens: number; total_tokens: number; cost: number }
+interface SummaryResp {
+  group_by: string; rows: AggRow[]; totals: Totals; trend: AggRow[];
+  models: string[]; unpriced_models: string[];
+}
 interface DetailRow {
   ts: string; user_id: string | null; display_name: string; dept_name?: string; model: string;
-  prompt_tokens: number; completion_tokens: number; total_tokens: number; spend: number;
+  prompt_tokens: number; completion_tokens: number; total_tokens: number; cost: number; peak: boolean;
   device: string | null; ip: string | null; request_id: string;
 }
 interface DetailResp { rows: DetailRow[]; page: number; page_size: number; total: number }
@@ -124,7 +137,8 @@ function localDay(offsetDays = 0): string {
 
 const nf = new Intl.NumberFormat("en-US");
 const fmt = (n: number) => nf.format(n ?? 0);
-const fmtSpend = (n: number) => `$${(n ?? 0).toFixed(4)}`;
+/** 人民币元。官方定价表就是按元报的,不做汇率换算。小额保留 4 位,大额到分即可。 */
+const fmtCost = (n: number) => `¥${(n ?? 0).toFixed((n ?? 0) >= 1 ? 2 : 4)}`;
 
 const GROUPS = ["employee", "department", "model", "day"] as const;
 type Group = typeof GROUPS[number];
@@ -248,7 +262,7 @@ export default function TokenStats() {
           { label: t.cardReq, value: fmt(totals?.requests || 0) },
           { label: t.cardIn, value: fmt(totals?.prompt_tokens || 0) },
           { label: t.cardOut, value: fmt(totals?.completion_tokens || 0) },
-          { label: t.cardSpend, value: fmtSpend(totals?.spend || 0), hint: t.spendHint },
+          { label: t.cardSpend, value: fmtCost(totals?.cost || 0), hint: t.spendHint },
         ].map((c) => (
           <div key={c.label} style={{ ...cardStyle, padding: "18px 20px", background: c.accent ? C.blueTint : "rgba(255,255,255,.92)" }}>
             <div style={eyebrow(8)}>{c.label}</div>
@@ -257,6 +271,13 @@ export default function TokenStats() {
           </div>
         ))}
       </div>
+
+      {/* 有模型没配单价 → 它的成本被算成 0,必须点名,否则"0 元"会被读成"没花钱" */}
+      {!!summary?.unpriced_models?.length && (
+        <div style={{ ...cardStyle, padding: "12px 18px", marginBottom: 18, background: "#FEF3C7", borderColor: C.warn }}>
+          <span style={{ color: C.warn, fontSize: 13 }}>{t.unpricedWarn(summary.unpriced_models.join("、"))}</span>
+        </div>
+      )}
 
       {/* ── 每日趋势(纯 CSS 条形,不引图表库) ── */}
       <div style={{ ...cardStyle, padding: "18px 20px", marginBottom: 18 }}>
@@ -325,7 +346,7 @@ export default function TokenStats() {
                   <TableCell style={numCell}>{fmt(r.prompt_tokens)}</TableCell>
                   <TableCell style={numCell}>{fmt(r.completion_tokens)}</TableCell>
                   <TableCell style={{ ...numCell, fontWeight: 800 }}>{fmt(r.total_tokens)}</TableCell>
-                  <TableCell style={numCell}>{fmtSpend(r.spend)}</TableCell>
+                  <TableCell style={numCell}>{fmtCost(r.cost)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -341,6 +362,8 @@ export default function TokenStats() {
                 <TableHead style={{ ...thStyle, textAlign: "right" }}>{t.thIn}</TableHead>
                 <TableHead style={{ ...thStyle, textAlign: "right" }}>{t.thOut}</TableHead>
                 <TableHead style={{ ...thStyle, textAlign: "right" }}>{t.thTotal}</TableHead>
+                <TableHead style={{ ...thStyle, textAlign: "right" }}>{t.thSpend}</TableHead>
+                <TableHead style={thStyle} title={t.peakTip}>{t.thPeak}</TableHead>
                 <TableHead style={thStyle}>{t.thDevice}</TableHead>
                 <TableHead style={thStyle}>{t.thIp}</TableHead>
                 <TableHead style={thStyle}>{t.thReqId}</TableHead>
@@ -358,6 +381,14 @@ export default function TokenStats() {
                   <TableCell style={numCell}>{fmt(r.prompt_tokens)}</TableCell>
                   <TableCell style={numCell}>{fmt(r.completion_tokens)}</TableCell>
                   <TableCell style={{ ...numCell, fontWeight: 800 }}>{fmt(r.total_tokens)}</TableCell>
+                  <TableCell style={numCell}>{fmtCost(r.cost)}</TableCell>
+                  <TableCell>
+                    <Badge style={{
+                      background: r.peak ? "#FEF3C7" : C.surface2,
+                      color: r.peak ? C.warn : C.muted,
+                      border: `1px solid ${r.peak ? C.warn : C.line}`,
+                    }} title={t.peakTip}>{r.peak ? t.peak : t.offPeak}</Badge>
+                  </TableCell>
                   <TableCell style={{ color: C.body }}>{r.device || "—"}</TableCell>
                   <TableCell style={{ fontFamily: FMONO, fontSize: 12, color: C.muted }}>{r.ip || "—"}</TableCell>
                   <TableCell style={{ fontFamily: FMONO, fontSize: 11, color: C.muted, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis" }} title={r.request_id}>

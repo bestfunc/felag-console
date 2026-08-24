@@ -127,7 +127,7 @@ def test_detail_pagination_is_clamped():
     actor = StubSuperadminProvider().get_actor({})
     ll = _ll({"ORDER BY \"startTime\" DESC": [
         ("2026-08-24 12:00:00", "7", "zhangsan", "yunwei", "deepseek-v4-pro",
-         100, 20, 120, 0.5, "PC-01", "10.0.0.9", "req-1")]})
+         100, 20, 120, 0.5, True, "PC-01", "10.0.0.9", "req-1")]})
     out = handle_usage_detail({**WINDOW, "page": 0, "page_size": 9999}, ll, _pg(), actor)
     assert out["page"] == 1 and out["page_size"] == 200
     assert out["rows"][0]["display_name"] == "张三"
@@ -138,7 +138,7 @@ def test_export_writes_csv_and_audits():
     actor = StubSuperadminProvider().get_actor({})
     ll = _ll({"ORDER BY \"startTime\" DESC": [
         ("2026-08-24 12:00:00", "7", "zhangsan", "yunwei", "deepseek-v4-pro",
-         100, 20, 120, 0.5, "PC-01", "10.0.0.9", "req-1")]})
+         100, 20, 120, 0.5, True, "PC-01", "10.0.0.9", "req-1")]})
     pg = _pg()
     out = handle_usage_export(dict(WINDOW), ll, pg, actor)
     assert out["rows"] == 1
