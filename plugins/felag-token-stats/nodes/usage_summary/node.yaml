@@ -1,0 +1,13 @@
+key: usage_summary
+name: 用量聚合
+description: 按员工/部门/模型/日期聚合 LLM token 用量,附总计与按天趋势;仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 聚合行 + 总计 + 趋势 + 该范围出现过的模型
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

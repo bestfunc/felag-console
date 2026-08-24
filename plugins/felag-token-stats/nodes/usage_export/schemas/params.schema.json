@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "导出用量明细",
+  "required": ["from", "to"],
+  "properties": {
+    "from": { "type": "string", "title": "起始日期(本地日历日,含)", "description": "YYYY-MM-DD" },
+    "to": { "type": "string", "title": "结束日期(本地日历日,含)", "description": "YYYY-MM-DD" },
+    "tz": { "type": "string", "title": "时区", "default": "Asia/Shanghai" },
+    "model": { "type": "string", "title": "只看某个模型" },
+    "user_id": { "type": "string", "title": "只看某个员工(平台 users.id)" }
+  }
+}

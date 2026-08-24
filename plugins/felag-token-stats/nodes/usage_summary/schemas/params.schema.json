@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "用量聚合",
+  "required": ["from", "to"],
+  "properties": {
+    "from": { "type": "string", "title": "起始日期(本地日历日,含)", "description": "YYYY-MM-DD" },
+    "to": { "type": "string", "title": "结束日期(本地日历日,含)", "description": "YYYY-MM-DD" },
+    "tz": { "type": "string", "title": "时区", "default": "Asia/Shanghai", "description": "spend logs 存的是 UTC,按此时区切分日历日" },
+    "group_by": {
+      "type": "string",
+      "title": "聚合维度",
+      "enum": ["employee", "department", "model", "day"],
+      "default": "employee"
+    },
+    "model": { "type": "string", "title": "只看某个模型" },
+    "user_id": { "type": "string", "title": "只看某个员工(平台 users.id)" }
+  }
+}

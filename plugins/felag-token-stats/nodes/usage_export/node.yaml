@@ -1,0 +1,13 @@
+key: usage_export
+name: 导出用量明细
+description: 把当前筛选范围的明细导出为 CSV(不分页,有条数上限);带员工归属与 IP,落审计;仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: CSV 文本 + 文件名 + 行数
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

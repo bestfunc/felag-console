@@ -1,0 +1,13 @@
+key: usage_detail
+name: 用量明细
+description: 逐请求用量明细(时间/员工/部门/模型/token/设备/IP/request_id),分页;不含请求文本;仅超管可用
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 明细行 + 分页信息
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

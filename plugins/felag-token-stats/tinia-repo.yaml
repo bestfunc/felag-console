@@ -1,0 +1,39 @@
+name: Token 用量统计
+version: 0.1.0
+description: Félag 数字员工的 LLM token 用量统计：按员工/部门/模型/日期聚合 + 逐请求明细，数据来自网关 LiteLLM 的 spend logs
+group: Félag
+name_i18n:
+  en: Token Usage
+group_i18n:
+  en: Félag
+sdk:
+  python: ">=3.11"
+table_prefix: plg_felagtoken_
+migrations:
+  - migrations/001_init.up.sql
+required_dbs:
+  - alias: platform_pg
+    description: 平台 PG（daily_report 库；查 users/departments 把 user_id 解析成姓名与部门，本插件审计表也在这）
+  - alias: litellm_pg
+    description: 网关 LiteLLM 的 PG（litellm 库；用量真相源 LiteLLM_SpendLogs）。121/175 上它与 daily_report 同属 dr-pg 实例，只是库名不同
+# MCP 能力暴露(§10):只暴露聚合口径的只读统计。
+# usage_detail / usage_export 刻意不暴露 —— 明细带员工归属 + 设备 + IP,是治理侧敏感数据,
+# 只给人在 UI 里看,不给外部 AI 批量抓取入口(与同仓 felag-app-release / felag-console-model 同规矩)。
+mcp:
+  expose:
+    - usage_summary
+modules:
+  nodes:
+    - usage_summary
+    - usage_detail
+    - usage_export
+  ui:
+    - name: main
+      kind: tsx
+      path: ui/TokenStats.tsx
+      title: Token 用量统计
+      menu_label: Token 用量
+      # ⚠️ 平台只认 41 个图标白名单,不在表里就是侧栏缺图标(Rocket/Boxes 都栽过)。
+      # BarChart3 未经本平台实测;若上线后侧栏没图标,换成已验证过的 Send / ListChecks / GitBranch。
+      menu_icon: BarChart3
+      menu_order: 54
