@@ -9,8 +9,18 @@ LIST_COLS = "id, name, scope_ref, display_name, profession, description, version
 
 
 def _rows(cur) -> list:
+    """出库行 → dict，并把 datetime/date 转成 isoformat 字符串。
+
+    不转的话节点 emit 时 json.dumps 会抛
+    'Object of type datetime is not JSON serializable' —— 而且抱得很晚：
+    写入已经成功提交了，只是返回的那一步挂，看起来像「保存失败」。
+    所有出库路径（list / get / get_by_name / list_audit）都走这里，收在一处。
+    """
     cols = [d[0] for d in cur.description]
-    return [dict(zip(cols, r)) for r in cur.fetchall()]
+    return [
+        {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in zip(cols, r)}
+        for r in cur.fetchall()
+    ]
 
 
 def list_by_scopes(conn, scopes, super_admin: bool) -> list:

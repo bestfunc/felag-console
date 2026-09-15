@@ -211,3 +211,22 @@ def test_actor_context_returns_manageable_scopes():
 def test_actor_context_empty_when_manages_nothing():
     out = nodes_impl.handle_actor_context({}, FakeConn(), Provider(scopes=()), Actor())
     assert out["manageable_scopes"] == []
+
+
+# ---- store._rows 的出库序列化 ----
+# 其余用例把整个 store monkeypatch 掉了，所以碰不到 _rows。
+# 它坏的时候症状很误导：写入已经提交成功，只是返回那一步
+# json.dumps 抛 'Object of type datetime is not JSON serializable'，看起来像保存失败。
+def test_rows_serializes_datetimes():
+    import datetime
+    import json
+
+    class FakeCur:
+        description = [("id",), ("name",), ("updated_at",)]
+
+        def fetchall(self):
+            return [(1, "a", datetime.datetime(2026, 9, 15, 8, 30, 0))]
+
+    rows = store._rows(FakeCur())
+    assert rows[0]["updated_at"] == "2026-09-15T08:30:00"
+    json.dumps(rows)  # 能序列化才算数——节点 emit 走的就是这一步
