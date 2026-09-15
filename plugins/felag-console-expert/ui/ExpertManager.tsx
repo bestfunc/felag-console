@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Button, Input, Label, Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
+import { Button, Label, Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
   Badge, toast, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
   useCurrentLanguage } from "@platform/ui";
 import { Plus, RefreshCw, Check, X, Ban, FileText } from "lucide-react";
@@ -17,7 +17,9 @@ const I18N = {
     detail: "详情", approve: "通过发布", reject: "驳回", deprecate: "下架",
     empty: "暂无专家",
     editTitle: "专家 EXPERT.md", scopeLabel: "发布作用域（部门或岗位）",
-    scopePh: "如 dept-3 或 pos-7",
+    cascaderHint: "点一个部门或岗位；选部门 = 该部门全体",
+    colEmpty: "无下级", selectedPrefix: "已选：",
+    noScopes: "你名下没有可管理的部门或岗位，无法发布专家",
     bodyLabel: "EXPERT.md 全文（frontmatter + 系统提示词）",
     save: "保存（提交待审）", saving: "保存中…", cancel: "取消",
     needBody: "请填写 EXPERT.md 内容", needScope: "请填写发布作用域",
@@ -36,7 +38,9 @@ const I18N = {
     detail: "Details", approve: "Approve", reject: "Reject", deprecate: "Deprecate",
     empty: "No experts yet",
     editTitle: "Expert EXPERT.md", scopeLabel: "Publish scope (department or position)",
-    scopePh: "e.g. dept-3 or pos-7",
+    cascaderHint: "Pick a department or position; a department means everyone in it",
+    colEmpty: "No children", selectedPrefix: "Selected: ",
+    noScopes: "You manage no department or position, so you cannot publish an expert",
     bodyLabel: "Full EXPERT.md (frontmatter + system prompt)",
     save: "Save (submit for review)", saving: "Saving…", cancel: "Cancel",
     needBody: "EXPERT.md content is required", needScope: "Publish scope is required",
@@ -88,6 +92,85 @@ async function callNode<T>(node: string, params: object, t: any): Promise<T> {
   return first?.output?.result as T;
 }
 
+type Scope = { scope_ref: string; label: string; parent_ref?: string | null };
+
+// 作用域列式级联（changeOnSelect）：点任一节点 = 直接选中它，有子级则右侧展开供细选。
+// 不让人手输 scope_ref：它得是 `dept:<id>` / `pos:<id>`，与 server 端 EntitledScopes
+// 产的串逐字节一致。手输成 `dept-3` 这种形态会发布成功、下发侧永远匹配不上，而且不报错。
+function ScopeCascader({ scopes, value, onChange, t }: {
+  scopes: Scope[]; value: string; onChange: (ref: string) => void; t: any;
+}) {
+  const [path, setPath] = useState<string[]>([]);
+  const byRef: Record<string, Scope> = {};
+  scopes.forEach((x) => { byRef[x.scope_ref] = x; });
+  const refset = new Set(scopes.map((x) => x.scope_ref));
+  const isRoot = (x: Scope) => !x.parent_ref || !refset.has(x.parent_ref);
+  const childrenOf = (ref: string) =>
+    scopes.filter((x) => x.parent_ref === ref).sort((a, b) => a.label.localeCompare(b.label));
+
+  const roots = scopes.filter(isRoot).sort((a, b) => a.label.localeCompare(b.label));
+  const columns: Scope[][] = [roots];
+  for (const q of path) { const kids = childrenOf(q); if (kids.length) columns.push(kids); }
+
+  const pick = (ci: number, n: Scope) => {
+    onChange(n.scope_ref);
+    const kids = childrenOf(n.scope_ref);
+    setPath((prev) => (kids.length ? [...prev.slice(0, ci), n.scope_ref] : prev.slice(0, ci)));
+  };
+
+  const selLabel = (ref: string) => {
+    const n = byRef[ref]; if (!n) return ref;
+    const par = n.parent_ref ? byRef[n.parent_ref] : undefined;
+    return (par ? par.label + " / " : "") + n.label;
+  };
+
+  if (scopes.length === 0) {
+    return <div style={{ fontSize: 12, color: "#B45309" }}>{t.noScopes}</div>;
+  }
+  return (
+    <div>
+      <div style={{ overflowX: "auto", border: "1px solid #D8E2F0", borderRadius: 12, background: "#fff" }}>
+        <div style={{ display: "flex", minWidth: "min-content" }}>
+          {columns.map((col, ci) => (
+            <div key={ci} style={{ flex: "0 0 168px", width: 168, maxHeight: 220, overflowY: "auto",
+              borderRight: ci < columns.length - 1 ? "1px solid #F1F6FD" : "none" }}>
+              {col.length === 0 && (
+                <div style={{ padding: 10, fontSize: 12, color: "#94a3b8" }}>{t.colEmpty}</div>
+              )}
+              {col.map((n) => {
+                const kids = childrenOf(n.scope_ref);
+                const selected = value === n.scope_ref;
+                const opened = path[ci] === n.scope_ref;
+                return (
+                  <div key={n.scope_ref} onClick={() => pick(ci, n)}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6,
+                      padding: "8px 10px", cursor: "pointer", fontSize: 13,
+                      color: selected ? "#0A84FF" : "#071225",
+                      fontWeight: selected ? 700 : 500,
+                      background: selected ? "#EAF4FF" : opened ? "#F1F6FD" : "#fff",
+                      borderBottom: "1px solid #F1F6FD" }}>
+                    <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{n.label}</span>
+                    {kids.length > 0 && (
+                      <span style={{ flexShrink: 0, fontFamily: "monospace", fontSize: 11,
+                        color: opened ? "#0A84FF" : "#64748B", background: opened ? "#EAF4FF" : "#F1F6FD",
+                        border: `1px solid ${opened ? "#0A84FF55" : "#D8E2F0"}`, borderRadius: 999, padding: "1px 7px" }}>
+                        {kids.length}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginTop: 6, fontFamily: "monospace", fontSize: 12, color: value ? "#0A84FF" : "#94a3b8" }}>
+        {value ? t.selectedPrefix + selLabel(value) : t.cascaderHint}
+      </div>
+    </div>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const lang = useCurrentLanguage();
   const t = I18N[lang === "en" ? "en" : "zh"];
@@ -113,12 +196,18 @@ export default function ExpertManager() {
   const [scope, setScope] = useState("");
   const [body, setBody] = useState("");
   const [saving, setSaving] = useState(false);
+  const [scopes, setScopes] = useState<Scope[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await callNode("expert_list", {}, t);
-      setRows(r?.experts || []);
+      // 两个节点并发：可管作用域是编辑弹窗的前置，晚一拍拿会让级联第一眼是空的。
+      const [lst, ctx] = await Promise.all([
+        callNode<{ experts: any[] }>("expert_list", {}, t),
+        callNode<{ manageable_scopes: Scope[] }>("actor_context", {}, t),
+      ]);
+      setRows(lst?.experts || []);
+      setScopes(ctx?.manageable_scopes || []);
     } catch (e: any) {
       toast.error(String(e.message || e));
     } finally {
@@ -127,6 +216,10 @@ export default function ExpertManager() {
   }, [t]);
 
   useEffect(() => { load(); }, [load]);
+
+  // scope_ref（dept:12 / pos:1）→ 组织名；没匹配上就回退显原码，
+  // 回退本身就是个信号：说明这条的作用域不在你可管范围内、或者部门已被删。
+  const scopeName = (ref: string) => scopes.find((x) => x.scope_ref === ref)?.label || ref;
 
   async function openNew() {
     setEditing(null); setScope(""); setBody(TEMPLATE); setOpen(true);
@@ -220,7 +313,7 @@ export default function ExpertManager() {
                 <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace" }}>{r.name}</span>
               </TableCell>
               <TableCell>{r.profession}</TableCell>
-              <TableCell style={{ fontFamily: "monospace", fontSize: 12 }}>{r.scope_ref}</TableCell>
+              <TableCell style={{ fontSize: 13 }}>{scopeName(r.scope_ref)}</TableCell>
               <TableCell style={{ fontFamily: "monospace", fontSize: 12 }}>{r.version}</TableCell>
               <TableCell><StatusBadge status={r.status} /></TableCell>
               <TableCell>
@@ -256,7 +349,7 @@ export default function ExpertManager() {
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div>
               <Label>{t.scopeLabel}</Label>
-              <Input value={scope} placeholder={t.scopePh} onChange={(e: any) => setScope(e.target.value)} />
+              <ScopeCascader scopes={scopes} value={scope} onChange={setScope} t={t} />
             </div>
             <div>
               <Label>{t.bodyLabel}</Label>

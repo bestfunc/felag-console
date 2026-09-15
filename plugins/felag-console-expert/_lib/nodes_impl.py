@@ -33,6 +33,20 @@ def _load_manageable(conn, provider, actor, expert_id):
 
 
 # ---- expert_list ----
+# ---- actor_context（给 UI 的可管组织树）----
+# scope_ref 形态是 `dept:<id>` / `pos:<id>`，与 server 端 EntitledScopes 产的串逐字节一致。
+# 这个节点存在的意义就是让 UI **不要让人手输** scope_ref ——
+# 手输成 `dept-3` 这种形态，发布会成功、下发侧永远匹配不上，而且不报错。
+def handle_actor_context(params, conn, provider, actor) -> dict:
+    scopes = provider.list_manageable_scopes(actor)
+    return {
+        "actor": {"user_id": actor.user_id, "name": actor.name, "dept_ref": actor.dept_ref},
+        "manageable_scopes": [
+            {"scope_ref": s.scope_ref, "label": s.label, "parent_ref": s.parent_ref} for s in scopes
+        ],
+    }
+
+
 def handle_expert_list(params, conn, provider, actor) -> dict:
     rows = store.list_by_scopes(conn, provider.manageable_scope_refs(actor), provider.can_manage_orphans(actor))
     return {"experts": rows}
