@@ -1,0 +1,13 @@
+key: expert_save
+name: 新建 / 编辑专家
+description: 提交 EXPERT.md 全文;校验通过后置为待审
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 保存结果
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

@@ -1,0 +1,13 @@
+key: expert_review
+name: 审核专家
+description: 通过发布 / 驳回;通过后即进入下发清单
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 审核结果
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

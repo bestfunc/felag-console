@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "title": "查询",
+  "required": [
+    "expert_id"
+  ],
+  "properties": {
+    "expert_id": {
+      "type": "integer",
+      "title": "专家 ID"
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

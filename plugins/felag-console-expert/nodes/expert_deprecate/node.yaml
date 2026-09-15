@@ -1,0 +1,13 @@
+key: expert_deprecate
+name: 下架专家
+description: 停止继续下发（已装到客户端的副本不会被远程删除）
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 下架结果
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

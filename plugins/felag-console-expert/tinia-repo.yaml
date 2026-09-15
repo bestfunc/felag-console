@@ -1,0 +1,32 @@
+name: 专家管理
+version: 0.1.0
+description: Félag 数字员工「专家」(岗位人格)注册/审核/发布治理
+group: Félag
+name_i18n:
+  en: Expert Management
+sdk:
+  python: ">=3.11"
+table_prefix: plg_felagexpert_
+migrations:
+  - migrations/001_init.up.sql
+required_dbs:
+  - alias: platform_pg
+    description: 平台 PG（daily_report 库，专家表与审计表所在；与 felag-console 同一条凭据）
+# MCP 能力暴露(§10):只暴露只读查询节点。
+# 写操作(expert_save/expert_review/expert_deprecate)刻意不暴露 —— 它们决定
+# 「数字员工以什么身份工作」并直接下发到所有客户端,属不可逆治理动作,应由人在 UI 里做,
+# 不给外部 AI 误调的机会(与 felag-console 对 skill 写操作的处置一致)。
+mcp:
+  expose:
+    - expert_list
+    - expert_detail
+    - audit_list
+modules:
+  nodes:
+    - actor_context
+    - expert_list
+    - expert_detail
+    - expert_save
+    - expert_review
+    - expert_deprecate
+    - audit_list

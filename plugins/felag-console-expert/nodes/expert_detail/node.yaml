@@ -1,0 +1,13 @@
+key: expert_detail
+name: 专家详情
+description: 取某专家的完整 EXPERT.md 与解析后的元数据
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 专家详情 + 正文
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

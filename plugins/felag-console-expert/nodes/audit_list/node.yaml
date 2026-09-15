@@ -1,0 +1,13 @@
+key: audit_list
+name: 审计流水
+description: 查治理动作流水（仅超管）
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 审计列表
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

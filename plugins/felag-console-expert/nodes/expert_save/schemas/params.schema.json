@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "title": "保存",
+  "required": [
+    "body",
+    "scope_ref"
+  ],
+  "properties": {
+    "expert_id": {
+      "type": "integer",
+      "title": "专家 ID（改时传，不传=新建）"
+    },
+    "scope_ref": {
+      "type": "string",
+      "title": "发布作用域（部门或岗位）"
+    },
+    "body": {
+      "type": "string",
+      "title": "EXPERT.md 全文"
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

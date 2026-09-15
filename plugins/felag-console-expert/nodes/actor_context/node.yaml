@@ -1,0 +1,13 @@
+key: actor_context
+name: 当前操作者上下文
+description: 返回调用者可管的作用域(供 UI 渲染选择器)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: actor + 可管作用域
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

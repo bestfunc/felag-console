@@ -1,0 +1,13 @@
+key: expert_list
+name: 列出专家
+description: 按可管作用域列出专家(不含正文)
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 专家列表
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt
