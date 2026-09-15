@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Button, Input, Label, Table, TableHeader, TableBody, TableRow, TableHead, TableCell,
   Badge, toast, Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
   useCurrentLanguage } from "@platform/ui";
-import { Plus, RefreshCw, Check, X, Archive, FileText } from "lucide-react";
+import { Plus, RefreshCw, Check, X, Ban, FileText } from "lucide-react";
 
 const SLUG = "felag-console-expert";
 
@@ -232,7 +232,7 @@ export default function ExpertManager() {
                   )}
                   {r.status === "published" && (
                     <Button size="sm" variant="outline" onClick={() => deprecate(r)}>
-                      <Archive size={13} style={{ marginRight: 4 }} />{t.deprecate}
+                      <Ban size={13} style={{ marginRight: 4 }} />{t.deprecate}
                     </Button>
                   )}
                 </div>

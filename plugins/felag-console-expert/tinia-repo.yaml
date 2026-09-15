@@ -1,9 +1,11 @@
 name: 专家管理
-version: 0.1.0
+version: 0.1.1
 description: Félag 数字员工「专家」(岗位人格)注册/审核/发布治理
 group: Félag
 name_i18n:
   en: Expert Management
+group_i18n:
+  en: Félag
 sdk:
   python: ">=3.11"
 table_prefix: plg_felagexpert_
@@ -30,3 +32,16 @@ modules:
     - expert_review
     - expert_deprecate
     - audit_list
+  # 🔴 少了这一段,插件照样能装、migration 照样跑、表照样建好,
+  # 只是侧栏永远不出菜单 —— v0.1.0 就是这么上的 121,表建出来了人却进不去。
+  # nodes 与 ui 是两件事:nodes 让后端跑得起来,ui 才让人看得见。
+  ui:
+    - name: main
+      kind: tsx
+      path: ui/ExpertManager.tsx
+      title: 专家管理
+      menu_label: 专家管理
+      # BookOpen 取自 121 前端 icons chunk 的实测导出表(见 DEPLOY.md);
+      # 平台图标是白名单制,不在表里就是侧栏缺图标(Rocket/Boxes/Send 都栽过)。
+      menu_icon: BookOpen
+      menu_order: 55

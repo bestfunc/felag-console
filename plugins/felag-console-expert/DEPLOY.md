@@ -57,6 +57,9 @@
 
 | 症状 | 原因 / 处理 |
 |---|---|
+| 插件装了、表也建了，**侧栏不出菜单** | `tinia-repo.yaml` 的 `modules` 里漏了 `ui:` 段。`nodes` 只让后端跑得起来，`ui` 才让人看得见，两者互不覆盖且漏了不报错。v0.1.0 就是这么上的 121。 |
+| 侧栏有菜单但**缺图标** | `menu_icon` 不在平台白名单内（Rocket / Boxes / Send 都栽过）。白名单的真相源是前端 icons chunk，可直接查：`docker exec dr-web sh -c "tail -c 4000 /usr/share/nginx/html/assets/icons-*.js"`，末尾的 `export{...}` 就是实测可用集（本插件的 BookOpen / Ban 取自此表）。 |
+| 改了插件但平台不更新 | 平台按 **semver 版本号**判定是否拉新，不是比字节。改了就得 bump `tinia-repo.yaml` 的 `version`，否则改多少都不生效。 |
 | 治理后台有,客户端拉不到 | felag-server 版本低于带 `/dist/experts/*` 的版本;或客户端没点「同步」。 |
 | `/dist/experts/manifest` 恒返回空 | ① 插件未装 → 表不存在,按 `42P01` 退化(预期);② 该用户不在任何已发布专家的作用域内;③ 专家状态不是 `published`。 |
 | fetch 回 500 `integrity check failed` | 库里的 `body` 被旁路改写、与登记的 `sha256` 对不上。**不要改 sha 去凑**,重新在 UI 里保存一次让它重算。 |
