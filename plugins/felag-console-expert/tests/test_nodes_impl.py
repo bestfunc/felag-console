@@ -30,9 +30,14 @@ class ScopeNode:
 
 
 class Actor:
+    """字段必须与 orgprovider.Actor **完全一致**：user_id / name / dept_ref。
+
+    这里曾经多了一个 `id`，而 nodes_impl 正好写的是 `actor.id` ——
+    21 个用例全绿，上了 121 一点保存就 AttributeError。
+    假对象比真对象宽松，测试就是在验证一个不存在的世界。别给它加字段。
+    """
+
     def __init__(self, id_="u1"):
-        self.id = id_
-        # handle_actor_context 要这三个字段（与 PlatformOrgProvider.get_actor 产的 Actor 同形）
         self.user_id = id_
         self.name = "tester"
         self.dept_ref = "dept:1"

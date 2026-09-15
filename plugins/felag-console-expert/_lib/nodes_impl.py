@@ -84,7 +84,7 @@ def handle_expert_save(params, conn, provider, actor) -> dict:
         store.update(conn, row["id"], scope_ref=scope_ref, display_name=meta["displayName"],
                      profession=meta.get("profession", ""), description=meta.get("description", ""),
                      version=meta["version"], avatar=meta.get("avatar", ""), body=raw, sha256=sha)
-        store.audit(conn, actor.id, scope_ref, "expert_update", name, {"version": meta["version"]})
+        store.audit(conn, actor.user_id, scope_ref, "expert_update", name, {"version": meta["version"]})
         conn.commit()
         return {"id": row["id"], "name": name, "status": "pending"}
 
@@ -93,8 +93,8 @@ def handle_expert_save(params, conn, provider, actor) -> dict:
     new_id = store.insert(conn, name=name, scope_ref=scope_ref, display_name=meta["displayName"],
                           profession=meta.get("profession", ""), description=meta.get("description", ""),
                           version=meta["version"], avatar=meta.get("avatar", ""),
-                          body=raw, sha256=sha, created_by=actor.id)
-    store.audit(conn, actor.id, scope_ref, "expert_create", name, {"version": meta["version"]})
+                          body=raw, sha256=sha, created_by=actor.user_id)
+    store.audit(conn, actor.user_id, scope_ref, "expert_create", name, {"version": meta["version"]})
     conn.commit()
     return {"id": new_id, "name": name, "status": "pending"}
 
@@ -107,8 +107,8 @@ def handle_expert_review(params, conn, provider, actor) -> dict:
         raise NodeError("该专家已是发布状态")
     status = "published" if approve else "rejected"
     reason = (params.get("reason") or "").strip() or None
-    store.set_status(conn, row["id"], status, actor.id, reason)
-    store.audit(conn, actor.id, row["scope_ref"], f"expert_{status}", row["name"], {"reason": reason})
+    store.set_status(conn, row["id"], status, actor.user_id, reason)
+    store.audit(conn, actor.user_id, row["scope_ref"], f"expert_{status}", row["name"], {"reason": reason})
     conn.commit()
     return {"id": row["id"], "status": status}
 
@@ -116,8 +116,8 @@ def handle_expert_review(params, conn, provider, actor) -> dict:
 # ---- expert_deprecate(下架)----
 def handle_expert_deprecate(params, conn, provider, actor) -> dict:
     row = _load_manageable(conn, provider, actor, params.get("expert_id"))
-    store.set_status(conn, row["id"], "deprecated", actor.id, None)
-    store.audit(conn, actor.id, row["scope_ref"], "expert_deprecate", row["name"], {})
+    store.set_status(conn, row["id"], "deprecated", actor.user_id, None)
+    store.audit(conn, actor.user_id, row["scope_ref"], "expert_deprecate", row["name"], {})
     conn.commit()
     # 下架只停止**继续下发**,已装到客户端的那份不会被远程删除 —— 与 skill/插件腿同缺口,
     # 在这里说明白,免得管理员以为点一下就收回了。
