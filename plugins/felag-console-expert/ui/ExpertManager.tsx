@@ -69,15 +69,23 @@ quickPrompts:
   提示词改不了它，写了只会让用户误以为可以。）
 `;
 
-async function callNode(nodeKey: string, params: any, t: any) {
-  const res = await fetch(`/api/plugins/${SLUG}/nodes/${nodeKey}/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ params }),
+// 平台的节点调用只有这一条路径：`/api/dag/<slug>/<node>`，params 直接作为 body。
+// 响应是三层信封 {code, message, data:{results:[{output:{result}, error}]}} ——
+// **HTTP 恒为 200**，节点抛异常也是 200，错误只在 code / results[0].error 里。
+// 所以不能拿 res.ok 当成败判据，否则节点报错会被当成成功、返回 undefined。
+async function callNode<T>(node: string, params: object, t: any): Promise<T> {
+  const resp = await fetch(`/api/dag/${SLUG}/${node}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(params),
   });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok || data?.error) throw new Error(data?.error || data?.message || t.reqFail);
-  return data?.result ?? data;
+  const env = await resp.json();
+  const first = env?.data?.results?.[0];
+  if (env?.code !== 0 || first?.error) {
+    const raw = first?.error || env?.message || t.reqFail;
+    // 节点抛的是 Python 异常，整段 traceback 弹到 toast 里人没法看，只抽末尾那句。
+    const m = String(raw).match(/(?:ValueError|RuntimeError|NodeError|TypeError):\s*([^\n]+)/);
+    throw new Error(m ? m[1].trim() : String(raw));
+  }
+  return first?.output?.result as T;
 }
 
 function StatusBadge({ status }: { status: string }) {
