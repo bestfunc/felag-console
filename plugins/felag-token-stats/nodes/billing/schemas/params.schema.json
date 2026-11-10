@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "required": ["action"],
+  "additionalProperties": false,
+  "properties": {
+    "action": {"type": "string", "enum": ["list", "grant", "rate"]},
+    "companyId": {"type": "integer", "minimum": 1},
+    "id": {"type": "string", "minLength": 16, "maxLength": 100},
+    "amountMicro": {"type": "integer", "minimum": 1, "maximum": 1000000000000},
+    "note": {"type": "string", "maxLength": 500},
+    "model": {"type": "string", "maxLength": 128},
+    "inputRate": {"type": "integer", "minimum": 0, "maximum": 1000000000},
+    "outputRate": {"type": "integer", "minimum": 0, "maximum": 1000000000}
+  }
+}

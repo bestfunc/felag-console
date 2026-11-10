@@ -140,6 +140,81 @@ const fmt = (n: number) => nf.format(n ?? 0);
 /** 人民币元。官方定价表就是按元报的,不做汇率换算。小额保留 4 位,大额到分即可。 */
 const fmtCost = (n: number) => `¥${(n ?? 0).toFixed((n ?? 0) >= 1 ? 2 : 4)}`;
 
+type BillingData = {
+  companies: {id: number; name: string; balanceMicro: number}[];
+  rates: {model: string; inputRate: number; outputRate: number}[];
+};
+
+function BillingPanel({t}: {t: Dict}) {
+  const [data, setData] = useState<BillingData | null>(null);
+  const [company, setCompany] = useState('');
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [model, setModel] = useState('');
+  const [input, setInput] = useState('');
+  const [output, setOutput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [pending, setPending] = useState<{key: string; id: string}>();
+  const refresh = async () => setData(await callNode<BillingData>('billing', {action: 'list'}, t));
+  const run = async (action: 'list' | 'grant' | 'rate') => {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      if (action === 'grant') {
+        const amountMicro = Math.round(Number(amount) * 1e6);
+        if (!company || !Number.isSafeInteger(amountMicro) || amountMicro <= 0 || amountMicro > 1e12) {
+          throw new Error('请选择公司并输入有效的正金额');
+        }
+        const fields = {companyId: Number(company), amountMicro, note: note.trim()};
+        const key = JSON.stringify(fields);
+        const id = pending?.key === key ? pending.id
+          : Array.from(crypto.getRandomValues(new Uint8Array(16)), n => n.toString(16).padStart(2, '0')).join('');
+        setPending({key, id});
+        await callNode('billing', {action, id, ...fields}, t);
+        setPending(undefined);
+        setAmount('');
+        setNote('');
+      } else if (action === 'rate') {
+        const inputRate = Math.round(Number(input) * 1e6);
+        const outputRate = Math.round(Number(output) * 1e6);
+        if (!model.trim() || !input.trim() || !output.trim() || ![inputRate, outputRate].every(
+          n => Number.isSafeInteger(n) && n >= 0 && n <= 1e9)) throw new Error('请输入模型别名和有效费率');
+        await callNode('billing', {action, model: model.trim(), inputRate, outputRate}, t);
+      }
+      await refresh();
+    } catch (e) {setError(e instanceof Error ? e.message : String(e));}
+    finally {setBusy(false);}
+  };
+  return <details style={{...cardStyle, padding: 16, marginBottom: 18}}
+    onToggle={e => {if (e.currentTarget.open && !data) void run('list');}}>
+    <summary style={{cursor: 'pointer', fontWeight: 700}}>公司额度与计费费率</summary>
+    {error && <p role="alert">{error}</p>}
+    <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 12}}>
+      <select value={company} onChange={e => setCompany(e.target.value)} aria-label="公司">
+        <option value="">选择公司</option>
+        {data?.companies.map(c => <option key={c.id} value={c.id}>{c.name}（可用 ¥{(c.balanceMicro / 1e6).toFixed(2)}）</option>)}
+      </select>
+      <Input value={amount} onChange={(e: any) => setAmount(e.target.value)} type="number" min="0" step="0.01" placeholder="上账金额（元）" aria-label="上账金额（元）" style={{width: 145}}/>
+      <Input value={note} onChange={(e: any) => setNote(e.target.value)} maxLength={500} placeholder="上账备注" aria-label="上账备注" style={{width: 145}}/>
+      <Button disabled={busy || !company || !amount} onClick={() => void run('grant')}>手动上账</Button>
+      <Button disabled={busy} onClick={() => void run('list')}>刷新额度</Button>
+    </div>
+    <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 12}}>
+      <Input value={model} onChange={(e: any) => setModel(e.target.value)} placeholder="网关模型别名" aria-label="网关模型别名" style={{width: 175}}/>
+      <Input value={input} onChange={(e: any) => setInput(e.target.value)} type="number" min="0" placeholder="输入 元/百万 Token" aria-label="输入费率" style={{width: 155}}/>
+      <Input value={output} onChange={(e: any) => setOutput(e.target.value)} type="number" min="0" placeholder="输出 元/百万 Token" aria-label="输出费率" style={{width: 155}}/>
+      <Button disabled={busy || !model || !input || !output} onClick={() => void run('rate')}>保存费率</Button>
+    </div>
+    <div style={{display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12}}>
+      {data?.rates.map(r => <Button key={r.model} style={btnGhost} onClick={() => {
+        setModel(r.model); setInput(String(r.inputRate / 1e6)); setOutput(String(r.outputRate / 1e6));
+      }}>{r.model} · {r.inputRate / 1e6} / {r.outputRate / 1e6}</Button>)}
+    </div>
+  </details>;
+}
+
 const GROUPS = ["employee", "department", "model", "day"] as const;
 type Group = typeof GROUPS[number];
 
@@ -238,6 +313,7 @@ export default function TokenStats() {
         </div>
       </div>
 
+      <BillingPanel t={t}/>
       {/* ── 筛选条 ── */}
       <div style={{ ...cardStyle, padding: 16, marginBottom: 18, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <Button style={btnGhost} onClick={() => quick(0)}>{t.today}</Button>

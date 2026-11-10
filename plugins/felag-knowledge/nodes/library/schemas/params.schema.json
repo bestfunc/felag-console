@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "required": ["action"],
+  "additionalProperties": false,
+  "properties": {
+    "action": {"type": "string", "enum": ["state", "upload", "save", "remove", "publish"]},
+    "revision": {"type": "integer", "minimum": 1},
+    "id": {"type": "string", "pattern": "^[a-f0-9]{32}$"},
+    "file": {"type": "string", "maxLength": 85},
+    "offset": {"type": "integer", "minimum": 0, "maximum": 268435456},
+    "total": {"type": "integer", "minimum": 1, "maximum": 268435456},
+    "chunk": {"type": "string", "maxLength": 5592408},
+    "item": {
+      "type": "object",
+      "required": ["file", "title", "category", "sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "file": {"type": "string", "maxLength": 85},
+        "title": {"type": "string", "maxLength": 100},
+        "category": {"type": "string", "maxLength": 30},
+        "summary": {"type": "string", "maxLength": 500},
+        "tags": {"type": "array", "maxItems": 12, "items": {"type": "string", "maxLength": 24}},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}

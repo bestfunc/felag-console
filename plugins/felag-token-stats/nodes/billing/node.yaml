@@ -1,0 +1,13 @@
+key: billing
+name: 公司额度与费率
+description: 仅超管可读取公司余额、手动上账和设置模型费率
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 公司余额、模型费率或操作结果
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

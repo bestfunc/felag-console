@@ -1,0 +1,13 @@
+key: library
+name: 维护 Felag 知识库
+description: 仅平台超管可编辑和发布资料
+inputs: []
+outputs:
+  - key: result
+    type: json
+    description: 草稿、发布信息或分片状态
+params_schema: schemas/params.schema.json
+runtime:
+  language: python
+  entry: runtime/run.py
+  requirements: runtime/requirements.txt

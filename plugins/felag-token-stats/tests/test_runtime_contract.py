@@ -1,7 +1,7 @@
 import pathlib, yaml, json
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-NODES = ["usage_summary", "usage_detail", "usage_export"]
+NODES = ["usage_summary", "usage_detail", "usage_export", "billing"]
 
 
 def test_all_nodes_declared_in_repo():
@@ -37,8 +37,10 @@ def test_run_py_imports_matching_handler():
     for k in NODES:
         src = (ROOT / "nodes" / k / "runtime" / "run.py").read_text(encoding="utf-8")
         assert f"handle_{k}" in src
-        # 两个库都要连上,否则跨库 merge 无从谈起
-        assert "connect_litellm" in src and "connect_platform" in src
+        assert "connect_platform" in src
+        if k != "billing":
+            # 用量报表跨两个库；计费治理走 Felag Server。
+            assert "connect_litellm" in src
 
 
 def test_migration_only_touches_own_prefix():

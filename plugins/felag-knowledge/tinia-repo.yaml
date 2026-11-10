@@ -1,0 +1,23 @@
+name: 知识库维护
+version: 0.1.1
+description: 在 V3 维护 Félag 工作站的手册、案例与教学视频
+group: Félag
+sdk:
+  python: ">=3.11"
+table_prefix: plg_felagknowledge_
+migrations:
+  - migrations/001_config.up.sql
+required_dbs:
+  - alias: platform_pg
+    description: V3 平台库，读取知识库治理服务令牌
+modules:
+  nodes:
+    - library
+  ui:
+    - name: main
+      kind: tsx
+      path: ui/KnowledgeAdmin.tsx
+      title: 知识库维护
+      menu_label: 知识库维护
+      menu_icon: FileText
+      menu_order: 55
